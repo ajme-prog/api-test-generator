@@ -289,8 +289,8 @@ jobs:
 
             // Inyectar el historial como variable global antes del cierre de </body>
             // El dashboard detecta EMBEDDED_HISTORY y lo usa en lugar del fetch a S3
-            const injection = '<script>window.EMBEDDED_HISTORY = ' + history + ';</script>';
-            html = html.replace('</body>', injection + '\n</body>');
+            const injection = '<script>window.EMBEDDED_HISTORY = ' + history + ';<\/script>';
+            html = html.replace('<!-- HISTORY_INJECTION_POINT -->', injection);
 
             // Guardar en docs/index.html (carpeta que sirve GitHub Pages)
             fs.mkdirSync('docs', { recursive: true });

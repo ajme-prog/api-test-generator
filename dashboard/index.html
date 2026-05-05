@@ -598,8 +598,8 @@ function loadDemo() {
 }
 
 // ─── Auto-carga desde historial embebido (GitHub Pages) ───────────────────
-// El pipeline inyecta window.EMBEDDED_HISTORY antes de </body> en GitHub Pages.
-// Puede cargarse antes o después de este script, así que verificamos en ambos momentos.
+// El pipeline inyecta window.EMBEDDED_HISTORY en docs/index.html.
+// Verificamos en varios momentos para asegurar la detección.
 function tryAutoLoad() {
   if (window.EMBEDDED_HISTORY && Array.isArray(window.EMBEDDED_HISTORY) && window.EMBEDDED_HISTORY.length > 0) {
     document.getElementById('url-input').value = '(historial embebido automáticamente)';
@@ -614,11 +614,10 @@ function tryAutoLoad() {
 
 // Intentar inmediatamente
 if (!tryAutoLoad()) {
-  // Si no estaba listo, reintentar cuando el DOM termine de cargar
   window.addEventListener('DOMContentLoaded', tryAutoLoad);
-  // Y también un fallback con setTimeout por si el script inyectado carga tarde
   setTimeout(tryAutoLoad, 500);
 }
 </script>
+<!-- HISTORY_INJECTION_POINT -->
 </body>
 </html>
