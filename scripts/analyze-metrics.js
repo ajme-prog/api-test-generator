@@ -87,10 +87,6 @@ async function pushHistory(history) {
     Key:         HISTORY_S3_KEY,
     Body:        JSON.stringify(history, null, 2),
     ContentType: 'application/json',
-    // Acceso público de lectura para que el dashboard pueda leerlo
-    // sin autenticación. Requiere que el bucket tenga deshabilitado
-    // "Block all public access" en la consola de AWS.
-    ACL: 'public-read',
   }));
   console.log(`☁️  Historial actualizado en s3://${process.env.S3_BUCKET_NAME}/${HISTORY_S3_KEY}`);
   console.log(`    URL pública: https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION||'us-east-1'}.amazonaws.com/${HISTORY_S3_KEY}`);
