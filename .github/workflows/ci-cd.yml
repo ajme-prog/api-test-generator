@@ -13,11 +13,11 @@ env:
 
 jobs:
   generate-and-test:
-    name: 🔁 Pipeline completo
+    name:  Pipeline completo
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout
+      - name:  Checkout
         uses: actions/checkout@v4
 
       - name: ⚙️ Configurar Node.js ${{ env.NODE_VERSION }}
@@ -26,16 +26,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: 📦 Instalar dependencias
+      - name:  Instalar dependencias
         run: npm ci
 
       # PASO NUEVO — swagger-autogen escanea Express y genera swagger-output.json
-      - name: 📐 Generar contrato OpenAPI (swagger-autogen)
+      - name:  Generar contrato OpenAPI (swagger-autogen)
         run: node scripts/swagger-gen.js
         env:
           API_BASE_URL: ${{ env.API_BASE_URL }}
 
-      - name: 📋 Verificar contrato generado
+      - name:  Verificar contrato generado
         run: |
           node -e "
             const spec = require('./swagger-output.json');
@@ -44,7 +44,7 @@ jobs:
             console.log('Total endpoints:', paths.length);
           "
 
-      - name: 🚀 Iniciar API en background
+      - name:  Iniciar API en background
         run: |
           npm start &
           for i in $(seq 1 30); do
@@ -57,7 +57,7 @@ jobs:
           PORT: 3000
           NODE_ENV: production
 
-      - name: 🤖 Generar casos de prueba (GPT-4o)
+      - name:  Generar casos de prueba (GPT-4o)
         run: node scripts/generate-tests.js
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -69,16 +69,16 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
 
-      - name: 🧪 Ejecutar pruebas (Newman)
+      - name:  Ejecutar pruebas (Newman)
         run: npm run run-tests
 
       # PASO NUEVO — Inyección de fallos controlada
-      - name: 🐛 Inyección de fallos controlada
+      - name:  Inyección de fallos controlada
         run: node scripts/inject-faults.js
         env:
           FAULT_PORT: 3001
 
-      - name: 📊 Resultado de inyección de fallos
+      - name:  Resultado de inyección de fallos
         run: |
           if [ -f reports/fault-injection-summary.json ]; then
             node -e "
@@ -90,14 +90,14 @@ jobs:
           fi
 
       # PASO NUEVO — Reporte PDF
-      - name: 📄 Generar reporte PDF
+      - name:  Generar reporte PDF
         run: node scripts/generate-pdf-report.js
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REF: ${{ github.ref }}
 
-      - name: 📦 Subir artefactos
+      - name:  Subir artefactos
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -108,7 +108,7 @@ jobs:
             swagger-output.json
           retention-days: 30
 
-      - name: ☁️ Subir resultados a S3
+      - name:  Subir resultados a S3
         if: always()
         run: |
           node -e "
@@ -133,7 +133,7 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
 
-      - name: 📈 Resumen final del pipeline
+      - name:  Resumen final del pipeline
         if: always()
         run: |
           echo "═══════════════════════════════════════"
@@ -164,13 +164,13 @@ jobs:
           echo "═══════════════════════════════════════"
 
   analyze-metrics:
-    name: 📊 Análisis y dashboard
+    name:  Análisis y dashboard
     needs: generate-and-test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && always()
 
     steps:
-      - name: 📥 Checkout
+      - name:  Checkout
         uses: actions/checkout@v4
 
       - name: ⚙️ Configurar Node.js
@@ -178,16 +178,16 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: 📦 Instalar dependencias
+      - name:  Instalar dependencias
         run: npm ci
 
-      - name: 📥 Descargar artefactos
+      - name:  Descargar artefactos
         uses: actions/download-artifact@v4
         with:
           name: test-reports-run${{ github.run_number }}
           path: reports/
 
-      - name: 📊 Generar reporte consolidado
+      - name:  Generar reporte consolidado
         run: node scripts/analyze-metrics.js
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
@@ -210,7 +210,7 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
 
-      - name: 📦 Subir resumen estadístico como artefacto
+      - name:  Subir resumen estadístico como artefacto
         uses: actions/upload-artifact@v4
         with:
           name: experiment-summary-run${{ github.run_number }}
@@ -219,7 +219,7 @@ jobs:
             reports/experiment-summary.md
           retention-days: 90
 
-      - name: ☁️ Subir resumen estadístico a S3
+      - name:  Subir resumen estadístico a S3
         run: |
           node -e "
             require('dotenv').config();
@@ -238,7 +238,7 @@ jobs:
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
 
       # ── Publicar dashboard en S3 ─────────────────────────────────────
-      - name: 🌐 Publicar dashboard en S3
+      - name:  Publicar dashboard en S3
         run: |
           node -e "
             require('dotenv').config();
@@ -257,7 +257,7 @@ jobs:
       # Copia el dashboard a docs/ con el historial embebido como variable
       # JavaScript para que funcione sin depender de fetch a S3.
       # GitHub Pages sirve docs/ como sitio web público automáticamente.
-      - name: 🚀 Publicar en GitHub Pages
+      - name:  Publicar en GitHub Pages
         run: |
           node -e "
             const fs = require('fs');
@@ -283,7 +283,7 @@ jobs:
           "
 
       # Commit y push de docs/ para que GitHub Pages lo sirva
-      - name: 📤 Commit docs/ a main
+      - name:  Commit docs/ a main
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
