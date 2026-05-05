@@ -598,7 +598,45 @@ function loadDemo() {
 }
 
 // ─── Auto-carga desde historial embebido (GitHub Pages) ───────────────────
-// El pipeline inyecta window.EMBEDDED_HISTORY antes de </body> en GitHub Pages.
+// El pipeline inyecta window.EMBEDDED_HISTORY antes de <script>window.EMBEDDED_HISTORY = [
+  {
+    "runId": "4",
+    "timestamp": "2026-05-05T05:57:34.058Z",
+    "branch": "main",
+    "commitSha": "3cf9e28",
+    "apiEndpoints": 3,
+    "casesGenerated": 12,
+    "casesExecuted": 12,
+    "tokensUsed": 6194,
+    "genDurationSeconds": 11.35,
+    "passRate": "72.22%",
+    "coveragePercent": "300%",
+    "avgResponseTime": 4.6,
+    "detectionRate": null,
+    "redundancyRate": "25.00%",
+    "exactDuplicates": 3,
+    "qualitativeFlags": 0
+  },
+  {
+    "runId": "5",
+    "timestamp": "2026-05-05T06:25:02.757Z",
+    "branch": "main",
+    "commitSha": "30ae919",
+    "apiEndpoints": 7,
+    "casesGenerated": 12,
+    "casesExecuted": 12,
+    "tokensUsed": 6109,
+    "genDurationSeconds": 12.69,
+    "passRate": "72.22%",
+    "coveragePercent": "128.57%",
+    "avgResponseTime": 4.7,
+    "detectionRate": null,
+    "redundancyRate": "25.00%",
+    "exactDuplicates": 3,
+    "qualitativeFlags": 0
+  }
+];</script>
+</body> en GitHub Pages.
 // Puede cargarse antes o después de este script, así que verificamos en ambos momentos.
 function tryAutoLoad() {
   if (window.EMBEDDED_HISTORY && Array.isArray(window.EMBEDDED_HISTORY) && window.EMBEDDED_HISTORY.length > 0) {
@@ -620,25 +658,5 @@ if (!tryAutoLoad()) {
   setTimeout(tryAutoLoad, 500);
 }
 </script>
-<script>window.EMBEDDED_HISTORY = [
-  {
-    "runId": "4",
-    "timestamp": "2026-05-05T05:57:34.058Z",
-    "branch": "main",
-    "commitSha": "3cf9e28",
-    "apiEndpoints": 3,
-    "casesGenerated": 12,
-    "casesExecuted": 12,
-    "tokensUsed": 6194,
-    "genDurationSeconds": 11.35,
-    "passRate": "72.22%",
-    "coveragePercent": "300%",
-    "avgResponseTime": 4.6,
-    "detectionRate": null,
-    "redundancyRate": "25.00%",
-    "exactDuplicates": 3,
-    "qualitativeFlags": 0
-  }
-];</script>
 </body>
 </html>
