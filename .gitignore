@@ -1,0 +1,11 @@
+node_modules/
+.env
+reports/
+*.log
+
+# docs/ es servido por GitHub Pages — NO ignorar
+!docs/
+
+# Colección generada (se regenera en el pipeline)
+# Comentar esta línea si quieres versionar la colección base
+# postman/collection.json

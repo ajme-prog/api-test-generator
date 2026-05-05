@@ -1,0 +1,38 @@
+{
+  "name": "api-test-generator",
+  "version": "2.0.0",
+  "description": "Prototipo para la generación automatizada de casos de prueba en APIs REST mediante LLMs integrados en pipelines CI/CD",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "swagger:gen": "node scripts/swagger-gen.js",
+    "generate-tests": "node scripts/generate-tests.js",
+    "run-tests": "newman run postman/collection.json --reporters cli,json --reporter-json-export reports/newman-report.json",
+    "inject-faults": "node scripts/inject-faults.js",
+    "inject-faults:list": "node scripts/inject-faults.js --list",
+    "report:pdf": "node scripts/generate-pdf-report.js",
+    "report:analyze": "node scripts/analyze-metrics.js",
+    "pipeline:local": "npm run swagger:gen && npm start & sleep 2 && npm run generate-tests && npm run run-tests && npm run inject-faults && npm run report:analyze && npm run report:pdf",
+    "full-pipeline": "npm run generate-tests && npm run run-tests",
+    "experiment:summary": "node scripts/summarize-experiment.js",
+    "experiment:summary:local": "node scripts/summarize-experiment.js --local",
+    "redundancy:check": "node -e \"const {analyzeRedundancy}=require(\"./src/utils/redundancy-analyzer\");const col=JSON.parse(require(\"fs\").readFileSync(\"./postman/collection.json\",\"utf8\"));const r=analyzeRedundancy(col);console.log(JSON.stringify(r,null,2));\""
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "swagger-autogen": "^2.23.7",
+    "swagger-ui-express": "^5.0.0",
+    "openai": "^4.28.0",
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.1",
+    "cors": "^2.8.5",
+    "morgan": "^1.10.0",
+    "@aws-sdk/client-s3": "^3.500.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3",
+    "newman": "^6.1.0",
+    "newman-reporter-htmlextra": "^1.23.1"
+  }
+}

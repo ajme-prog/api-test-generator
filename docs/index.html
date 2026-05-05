@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline Dashboard — API Test Generator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Sora:wght@400;600;700&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --ink:     #0f0e17;
+  --ink2:    #2d2b3d;
+  --muted:   #6e6d87;
+  --border:  #e4e3f0;
+  --surface: #ffffff;
+  --bg:      #f5f4fc;
+  --acc:     #4f46e5;
+  --acc2:    #7c3aed;
+  --ok:      #059669;
+  --warn:    #d97706;
+  --err:     #dc2626;
+  --radius:  12px;
+  --mono:    'IBM Plex Mono', monospace;
+  --sans:    'Sora', sans-serif;
+}
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ─── Header ─── */
+header {
+  background: var(--ink);
+  color: #fff;
+  padding: 0 32px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  height: 64px;
+  position: sticky; top: 0; z-index: 100;
+  border-bottom: 3px solid var(--acc);
+}
+.logo { display: flex; align-items: center; gap: 12px; }
+.logo-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--acc); box-shadow: 0 0 8px var(--acc);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.logo h1 { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+.logo p  { font-size: 11px; color: rgba(255,255,255,.5); font-family: var(--mono); }
+#live-badge {
+  font-family: var(--mono); font-size: 11px;
+  padding: 4px 12px; border-radius: 20px;
+  background: rgba(79,70,229,.2);
+  border: 1px solid rgba(79,70,229,.4);
+  color: #a5b4fc; white-space: nowrap;
+}
+
+/* ─── Config ─── */
+.config {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 32px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.config label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.config input {
+  font-family: var(--mono); font-size: 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 12px; background: var(--bg); color: var(--ink);
+  outline: none; min-width: 380px; transition: border .2s;
+}
+.config input:focus { border-color: var(--acc); }
+.config select {
+  font-family: var(--mono); font-size: 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; background: var(--bg); color: var(--ink); outline: none;
+}
+.btn {
+  font-family: var(--sans); font-size: 12px; font-weight: 600;
+  padding: 7px 18px; border-radius: 8px; border: none;
+  cursor: pointer; transition: opacity .15s, transform .1s;
+}
+.btn:active { transform: scale(.97); }
+.btn-primary { background: var(--acc); color: #fff; }
+.btn-ghost   { background: var(--bg);  color: var(--muted); border: 1px solid var(--border); }
+.btn:hover { opacity: .85; }
+.hint {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  background: var(--bg); border: 1px dashed var(--border);
+  border-radius: 6px; padding: 4px 10px;
+}
+
+/* ─── Main ─── */
+main { max-width: 1280px; margin: 0 auto; padding: 28px 24px; }
+
+/* ─── States ─── */
+#state-empty, #state-loading, #state-error {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; padding: 80px 24px;
+  text-align: center; color: var(--muted);
+}
+.state-icon  { font-size: 48px; opacity: .35; }
+.state-title { font-size: 16px; font-weight: 600; color: var(--ink2); }
+.state-sub   { font-size: 13px; max-width: 520px; line-height: 1.8; }
+code { font-family: var(--mono); background: var(--border); padding: 1px 5px; border-radius: 4px; font-size: .9em; }
+#state-error .state-title { color: var(--err); }
+.err-box {
+  font-family: var(--mono); font-size: 12px;
+  padding: 14px 20px; background: #fff1f1;
+  border: 1px solid #fca5a5; border-radius: 8px;
+  color: var(--err); max-width: 520px; text-align: left; line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+/* ─── Dashboard ─── */
+#dashboard { display: none; }
+
+/* ─── KPIs ─── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px; margin-bottom: 26px;
+}
+.kpi {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px 20px;
+  position: relative; overflow: hidden; transition: box-shadow .2s;
+}
+.kpi:hover { box-shadow: 0 4px 20px rgba(79,70,229,.1); }
+.kpi::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--kpi-c, var(--acc));
+}
+.kpi .label {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px;
+}
+.kpi .value {
+  font-size: 30px; font-weight: 700; letter-spacing: -.02em;
+  color: var(--kpi-c, var(--acc)); line-height: 1;
+}
+.kpi .sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* ─── Charts grid ─── */
+.charts-2col {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 16px; margin-bottom: 16px;
+}
+@media (max-width: 860px) { .charts-2col { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px 22px;
+  margin-bottom: 16px; transition: box-shadow .2s;
+}
+.card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.06); }
+.card-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 14px;
+}
+.card-title { font-size: 13px; font-weight: 600; color: var(--ink2); }
+.card-sub   { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.chart-box  { position: relative; height: 210px; }
+
+/* ─── Table ─── */
+.table-wrap { overflow-x: auto; margin-top: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th {
+  background: var(--ink); color: rgba(255,255,255,.8);
+  padding: 9px 13px; text-align: left;
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em; white-space: nowrap;
+}
+tbody tr { transition: background .1s; }
+tbody tr:hover { background: var(--bg); }
+tbody td {
+  padding: 8px 13px; border-bottom: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11px; color: var(--ink2);
+  white-space: nowrap;
+}
+.pill {
+  display: inline-block; padding: 2px 9px; border-radius: 20px;
+  font-size: 10px; font-weight: 700; font-family: var(--mono);
+}
+.ok   { background: #d1fae5; color: #065f46; }
+.warn { background: #fef3c7; color: #92400e; }
+.err  { background: #fee2e2; color: #991b1b; }
+.gray { background: #f3f4f6; color: #4b5563; }
+.run-id { color: var(--acc); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    <div>
+      <h1>API Test Generator — Pipeline Dashboard</h1>
+      <p>Tesis USAC · Alan Joel Morataya Escobar · 2025</p>
+    </div>
+  </div>
+  <span id="live-badge">Sin datos</span>
+</header>
+
+<div class="config">
+  <label>URL del historial S3</label>
+  <input id="url-input" type="text"
+    placeholder="https://TU-BUCKET.s3.us-east-1.amazonaws.com/history/runs-history.json">
+  <select id="last-n">
+    <option value="10">Últimas 10</option>
+    <option value="20" selected>Últimas 20</option>
+    <option value="50">Últimas 50</option>
+    <option value="9999">Todas</option>
+  </select>
+  <button class="btn btn-primary" onclick="loadFromS3()">Cargar</button>
+  <button class="btn btn-ghost"   onclick="loadDemo()">Demo</button>
+  <span class="hint">URL se auto-imprime en el log de GitHub Actions tras cada push</span>
+</div>
+
+<main>
+
+  <div id="state-empty">
+    <div class="state-icon">📊</div>
+    <div class="state-title">Dashboard listo</div>
+    <div class="state-sub">
+      Ingresa la URL pública del archivo <code>history/runs-history.json</code> de tu bucket S3.<br><br>
+      Esa URL se imprime automáticamente en el log de GitHub Actions
+      al finalizar cada run (paso <strong>analyze-metrics</strong>).<br><br>
+      Formato: <code>https://BUCKET.s3.REGION.amazonaws.com/history/runs-history.json</code><br><br>
+      Usa <strong>Demo</strong> para ver el dashboard con datos simulados.
+    </div>
+  </div>
+
+  <div id="state-loading" style="display:none">
+    <div class="state-icon">⏳</div>
+    <div class="state-title">Cargando historial…</div>
+    <div class="state-sub" id="loading-msg">Descargando runs-history.json desde S3</div>
+  </div>
+
+  <div id="state-error" style="display:none">
+    <div class="state-icon">⚠️</div>
+    <div class="state-title">Error al cargar</div>
+    <div class="err-box" id="err-msg"></div>
+    <div class="state-sub">
+      Verifica que el bucket tenga acceso público de lectura habilitado
+      y que la política de CORS permita peticiones desde el navegador.<br><br>
+      Consulta el README para la configuración mínima de S3.
+    </div>
+  </div>
+
+  <div id="dashboard">
+    <div class="kpi-grid" id="kpi-grid"></div>
+
+    <div class="charts-2col">
+      <div class="card" style="margin-bottom:0">
+        <div class="card-head">
+          <span class="card-title">Tasa de éxito de assertions</span>
+          <span class="card-sub">% por run</span>
+        </div>
+        <div class="chart-box"><canvas id="c-pass"></canvas></div>
+      </div>
+      <div class="card" style="margin-bottom:0">
+        <div class="card-head">
+          <span class="card-title">Casos generados vs ejecutados</span>
+          <span class="card-sub">por run</span>
+        </div>
+        <div class="chart-box"><canvas id="c-cases"></canvas></div>
+      </div>
+    </div>
+
+    <div class="charts-2col">
+      <div class="card" style="margin-bottom:0">
+        <div class="card-head">
+          <span class="card-title">Tiempo promedio de respuesta</span>
+          <span class="card-sub">ms por run</span>
+        </div>
+        <div class="chart-box"><canvas id="c-rt"></canvas></div>
+      </div>
+      <div class="card" style="margin-bottom:0">
+        <div class="card-head">
+          <span class="card-title">Tasa de detección de fallos</span>
+          <span class="card-sub">inject-faults.js (%)</span>
+        </div>
+        <div class="chart-box"><canvas id="c-faults"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Cobertura de endpoints del spec OpenAPI</span>
+        <span class="card-sub">% por run</span>
+      </div>
+      <div class="chart-box"><canvas id="c-cov"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Historial completo de ejecuciones</span>
+        <span class="card-sub" id="tbl-count"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Run</th><th>Fecha</th><th>Rama</th><th>Endpoints</th>
+            <th>Generados</th><th>Ejecutados</th><th>Tasa éxito</th>
+            <th>Cobertura</th><th>Redundancia</th><th>Avg RT</th><th>Tokens</th><th>Detección fallos</th>
+          </tr></thead>
+          <tbody id="tbl-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ─── Colores ───────────────────────────────────────────────────────────────
+const C = {
+  acc:'#4f46e5', acc2:'#7c3aed',
+  ok:'#059669',  warn:'#d97706', err:'#dc2626', gray:'#6e6d87',
+};
+
+const CHART_OPT = {
+  responsive: true, maintainAspectRatio: false,
+  plugins: {
+    legend: { display: true, position: 'top',
+      labels: { font:{size:11,family:'IBM Plex Mono'}, boxWidth:12, padding:12 } },
+    tooltip: { mode:'index', intersect:false },
+  },
+  scales: {
+    x: { ticks:{ font:{size:10,family:'IBM Plex Mono'}, maxRotation:35 },
+         grid:{ display:false } },
+    y: { ticks:{ font:{size:10} }, grid:{ color:'#eeecfa' } },
+  },
+};
+
+const charts = {};
+function mkChart(id, cfg) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id).getContext('2d'), cfg);
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+function pct(v) {
+  if (v == null || v === 'N/A') return null;
+  return parseFloat(String(v).replace('%',''));
+}
+function pillClass(v, g=80, w=60) {
+  if (v == null) return 'gray';
+  return v >= g ? 'ok' : v >= w ? 'warn' : 'err';
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return iso.substring(0,16).replace('T',' ');
+}
+function fmtNum(v) { return v != null ? Number(v).toLocaleString() : '—'; }
+
+// ─── Estados ───────────────────────────────────────────────────────────────
+function showState(id, msg='') {
+  ['state-empty','state-loading','state-error','dashboard']
+    .forEach(s => document.getElementById(s).style.display = 'none');
+  if (id === 'dashboard') {
+    document.getElementById('dashboard').style.display = 'block';
+  } else {
+    document.getElementById(id).style.display = 'flex';
+    if (id === 'state-error')   document.getElementById('err-msg').textContent = msg;
+    if (id === 'state-loading') document.getElementById('loading-msg').textContent = msg;
+  }
+}
+
+// ─── Render ────────────────────────────────────────────────────────────────
+function render(allRuns) {
+  const n    = parseInt(document.getElementById('last-n').value);
+  const runs = allRuns.slice(-n);
+
+  if (!runs.length) {
+    showState('state-error',
+      'El archivo runs-history.json existe pero está vacío.\n' +
+      'Espera a que al menos un run complete el paso analyze-metrics.');
+    return;
+  }
+
+  const last = runs[runs.length - 1];
+  const labels = runs.map(r => `#${r.runId}`);
+
+  // ── KPIs ──
+  const avgPass = (runs.reduce((s,r)=>s+(pct(r.passRate)||0),0)/runs.length).toFixed(1);
+  const avgCases= Math.round(runs.reduce((s,r)=>s+(r.casesGenerated||0),0)/runs.length);
+  const rtRuns  = runs.filter(r=>r.avgResponseTime!=null);
+  const avgRT   = rtRuns.length
+    ? Math.round(rtRuns.reduce((s,r)=>s+r.avgResponseTime,0)/rtRuns.length) : 0;
+  const detArr  = runs.map(r=>pct(r.detectionRate)).filter(v=>v!=null);
+  const avgDet  = detArr.length
+    ? (detArr.reduce((a,b)=>a+b,0)/detArr.length).toFixed(1) : null;
+  const lastPR  = pct(last.passRate);
+
+  const kpiColor = (v, g=80, w=60) =>
+    v==null ? C.gray : v>=g ? C.ok : v>=w ? C.warn : C.err;
+
+  document.getElementById('kpi-grid').innerHTML = `
+    <div class="kpi" style="--kpi-c:${kpiColor(lastPR)}">
+      <div class="label">Tasa éxito — último run</div>
+      <div class="value">${lastPR!=null ? lastPR+'%' : '—'}</div>
+      <div class="sub">assertions aprobadas / total</div>
+    </div>
+    <div class="kpi" style="--kpi-c:${C.acc}">
+      <div class="label">Casos generados (prom.)</div>
+      <div class="value">${avgCases}</div>
+      <div class="sub">GPT-4o por ejecución</div>
+    </div>
+    <div class="kpi" style="--kpi-c:${kpiColor(avgDet,70,50)}">
+      <div class="label">Detección fallos (prom.)</div>
+      <div class="value">${avgDet!=null ? avgDet+'%' : 'N/A'}</div>
+      <div class="sub">inject-faults.js</div>
+    </div>
+    <div class="kpi" style="--kpi-c:${C.warn}">
+      <div class="label">Avg respuesta (prom.)</div>
+      <div class="value">${avgRT}ms</div>
+      <div class="sub">entre ejecuciones</div>
+    </div>
+    <div class="kpi" style="--kpi-c:${C.acc}">
+      <div class="label">Tasa éxito promedio</div>
+      <div class="value">${avgPass}%</div>
+      <div class="sub">todas las ejecuciones</div>
+    </div>
+    <div class="kpi" style="--kpi-c:${C.gray}">
+      <div class="label">Ejecuciones mostradas</div>
+      <div class="value">${runs.length}</div>
+      <div class="sub">de ${allRuns.length} en historial</div>
+    </div>`;
+
+  // ── Chart: tasa de éxito (línea) ──
+  mkChart('c-pass', { type:'line', data:{ labels, datasets:[
+    { label:'Tasa éxito %', data:runs.map(r=>pct(r.passRate)),
+      borderColor:C.acc, backgroundColor:C.acc+'18', borderWidth:2.5,
+      pointRadius:5, pointHoverRadius:7, pointBackgroundColor:'#fff',
+      pointBorderColor:C.acc, pointBorderWidth:2, tension:.35, fill:true },
+    { label:'Meta 80%', data:runs.map(()=>80),
+      borderColor:C.ok+'88', borderDash:[5,4], borderWidth:1.5,
+      pointRadius:0, fill:false },
+  ]}, options:{ ...CHART_OPT,
+    scales:{...CHART_OPT.scales, y:{...CHART_OPT.scales.y, min:0, max:105}} }});
+
+  // ── Chart: casos generados vs ejecutados (barras) ──
+  mkChart('c-cases', { type:'bar', data:{ labels, datasets:[
+    { label:'Generados',  data:runs.map(r=>r.casesGenerated||0),
+      backgroundColor:C.acc+'cc', borderRadius:4 },
+    { label:'Ejecutados', data:runs.map(r=>r.casesExecuted||0),
+      backgroundColor:C.acc2+'cc', borderRadius:4 },
+  ]}, options:{ ...CHART_OPT, barPercentage:.72, categoryPercentage:.72 }});
+
+  // ── Chart: tiempo de respuesta (línea) ──
+  mkChart('c-rt', { type:'line', data:{ labels, datasets:[
+    { label:'Avg RT (ms)', data:runs.map(r=>r.avgResponseTime||null),
+      borderColor:C.warn, backgroundColor:C.warn+'15', borderWidth:2.5,
+      pointRadius:4, tension:.35, fill:true },
+    { label:'Límite 2000ms', data:runs.map(()=>2000),
+      borderColor:C.err+'66', borderDash:[5,4], borderWidth:1.5,
+      pointRadius:0, fill:false },
+  ]}, options:CHART_OPT});
+
+  // ── Chart: detección de fallos (barras semáforo + tendencia) ──
+  const detVals  = runs.map(r=>pct(r.detectionRate));
+  const detColors= detVals.map(v=>
+    v==null ? C.gray+'66' : v>=70 ? C.ok+'cc' : v>=50 ? C.warn+'cc' : C.err+'cc');
+
+  const detDatasets = [
+    { label:'Detección %', data:detVals, backgroundColor:detColors,
+      borderRadius:4, type:'bar' }
+  ];
+  const validDet = detVals.map((v,i)=>({v,i})).filter(x=>x.v!=null);
+  if (validDet.length >= 3) {
+    // promedio móvil de 3 como línea de tendencia
+    const ma = detVals.map((v,i,a)=>{
+      const sl = a.slice(Math.max(0,i-2),i+1).filter(x=>x!=null);
+      return sl.length ? sl.reduce((s,x)=>s+x,0)/sl.length : null;
+    });
+    detDatasets.push({ label:'Tendencia', data:ma, borderColor:C.ok,
+      borderWidth:2, pointRadius:0, tension:.4, fill:false, type:'line' });
+  }
+  mkChart('c-faults', { type:'bar', data:{ labels, datasets:detDatasets },
+    options:{ ...CHART_OPT,
+      scales:{...CHART_OPT.scales, y:{...CHART_OPT.scales.y, min:0, max:110}},
+      plugins:{...CHART_OPT.plugins, legend:{
+        display: detDatasets.length > 1,
+        position:'top', labels:{font:{size:11,family:'IBM Plex Mono'}, boxWidth:12}
+      }} }});
+
+  // ── Chart: cobertura (barras + tendencia) ──
+  const covVals = runs.map(r=>pct(r.coveragePercent));
+  const covDS = [
+    { label:'Cobertura %', data:covVals,
+      backgroundColor:C.acc2+'bb', borderRadius:4, type:'bar' }
+  ];
+  if (runs.length >= 3) {
+    const ma = covVals.map((v,i,a)=>{
+      const sl = a.slice(Math.max(0,i-2),i+1).filter(x=>x!=null);
+      return sl.length ? sl.reduce((s,x)=>s+x,0)/sl.length : null;
+    });
+    covDS.push({ label:'Tendencia', data:ma, borderColor:C.ok,
+      borderWidth:2, pointRadius:0, tension:.4, fill:false, type:'line' });
+  }
+  mkChart('c-cov', { type:'bar', data:{ labels, datasets:covDS },
+    options:{ ...CHART_OPT,
+      scales:{...CHART_OPT.scales, y:{...CHART_OPT.scales.y, min:0, max:110}} }});
+
+  // ── Tabla ──
+  document.getElementById('tbl-count').textContent =
+    `${runs.length} mostradas / ${allRuns.length} en historial`;
+  const tbody = document.getElementById('tbl-body');
+  tbody.innerHTML = '';
+  [...runs].reverse().forEach(r => {
+    const pr = pct(r.passRate); const dr = pct(r.detectionRate);
+    const cv = pct(r.coveragePercent); const rr = pct(r.redundancyRate);
+    tbody.innerHTML += `<tr>
+      <td class="run-id">#${r.runId}</td>
+      <td>${fmtDate(r.timestamp)}</td>
+      <td>${r.branch||'—'}</td>
+      <td>${r.apiEndpoints??'—'}</td>
+      <td>${r.casesGenerated??'—'}</td>
+      <td>${r.casesExecuted??'—'}</td>
+      <td><span class="pill ${pillClass(pr)}">${r.passRate||'—'}</span></td>
+      <td><span class="pill ${pillClass(cv)}">${r.coveragePercent||'—'}</span></td>
+      <td><span class="pill ${rr===null?'gray':rr<10?'ok':rr<25?'warn':'err'}">${r.redundancyRate||'—'}</span></td>
+      <td>${r.avgResponseTime!=null ? r.avgResponseTime+'ms' : '—'}</td>
+      <td>${fmtNum(r.tokensUsed)}</td>
+      <td><span class="pill ${pillClass(dr,70,50)}">${r.detectionRate||'N/A'}</span></td>
+    </tr>`;
+  });
+
+  document.getElementById('live-badge').textContent =
+    `${allRuns.length} runs · actualizado ${fmtDate(new Date().toISOString())}`;
+  showState('dashboard');
+}
+
+// ─── Cargar desde S3 ──────────────────────────────────────────────────────
+async function loadFromS3() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) { alert('Ingresa la URL del historial S3'); return; }
+
+  showState('state-loading', `Descargando ${url}`);
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(
+      `HTTP ${res.status} ${res.statusText}\n\n` +
+      `Posibles causas:\n` +
+      `• El bucket no tiene acceso público de lectura\n` +
+      `• La URL es incorrecta\n` +
+      `• El archivo aún no existe (espera al primer push)\n` +
+      `• El bucket requiere configuración de CORS`
+    );
+    const data = await res.json();
+    if (!Array.isArray(data)) throw new Error(
+      'El archivo descargado no es un array JSON válido.\n' +
+      'Verifica que la URL apunta a runs-history.json correcto.'
+    );
+    render(data);
+  } catch (err) {
+    showState('state-error', err.message);
+  }
+}
+
+// ─── Demo ─────────────────────────────────────────────────────────────────
+function loadDemo() {
+  const base = Date.now() - 20 * 24 * 60 * 60 * 1000;
+  const runs = Array.from({ length: 18 }, (_, i) => {
+    const pr = Math.min(100, 55 + i * 2.8  + (Math.random()-.5)*7).toFixed(1);
+    const dr = Math.min(100, 48 + i * 3    + (Math.random()-.5)*9).toFixed(1);
+    const cv = Math.min(100, 62 + i * 2.1  + (Math.random()-.5)*5).toFixed(1);
+    const rr = Math.max(0,   20 - i * 1.2  + (Math.random()-.5)*4).toFixed(1);
+    const dt = new Date(base + i * 26 * 60 * 60 * 1000);
+    return {
+      runId:           i + 1,
+      timestamp:       dt.toISOString(),
+      branch:          i < 5 ? 'develop' : 'main',
+      commitSha:       Math.random().toString(16).substring(2,9),
+      apiEndpoints:    13,
+      casesGenerated:  20 + Math.round(Math.random() * 10),
+      casesExecuted:   20 + Math.round(Math.random() * 10),
+      tokensUsed:      3100 + Math.round(Math.random() * 1800),
+      genDurationSeconds: (2 + Math.random() * 2).toFixed(1),
+      passRate:        pr + '%',
+      coveragePercent: cv + '%',
+      avgResponseTime: 85 + Math.round(Math.random() * 90),
+      detectionRate:   dr + '%',
+      redundancyRate:  rr + '%',
+    };
+  });
+  document.getElementById('live-badge').textContent = 'DEMO — datos simulados';
+  render(runs);
+}
+
+// ─── Auto-carga desde historial embebido (GitHub Pages) ───────────────────
+// El pipeline inyecta window.EMBEDDED_HISTORY antes de publicar en GitHub Pages.
+// Si existe, carga automáticamente sin pedir URL al usuario.
+;(function autoLoad() {
+  if (window.EMBEDDED_HISTORY && Array.isArray(window.EMBEDDED_HISTORY) && window.EMBEDDED_HISTORY.length > 0) {
+    document.getElementById('url-input').value = '(historial embebido automáticamente)';
+    document.getElementById('url-input').disabled = true;
+    document.querySelector('.btn-primary').disabled = true;
+    document.getElementById('live-badge').textContent = 'GitHub Pages — datos en vivo';
+    render(window.EMBEDDED_HISTORY);
+  }
+})();
+</script>
+</body>
+</html>

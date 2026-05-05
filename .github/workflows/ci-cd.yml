@@ -1,0 +1,295 @@
+name: CI/CD - Generación y Ejecución Automática de Pruebas
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  API_BASE_URL: 'http://localhost:3000'
+
+jobs:
+  generate-and-test:
+    name: 🔁 Pipeline completo
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Instalar dependencias
+        run: npm ci
+
+      # PASO NUEVO — swagger-autogen escanea Express y genera swagger-output.json
+      - name: 📐 Generar contrato OpenAPI (swagger-autogen)
+        run: node scripts/swagger-gen.js
+        env:
+          API_BASE_URL: ${{ env.API_BASE_URL }}
+
+      - name: 📋 Verificar contrato generado
+        run: |
+          node -e "
+            const spec = require('./swagger-output.json');
+            const paths = Object.keys(spec.paths || {});
+            paths.forEach(p => console.log(' ', p));
+            console.log('Total endpoints:', paths.length);
+          "
+
+      - name: 🚀 Iniciar API en background
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null; then
+              echo "✅ API lista (intento $i)"; break
+            fi
+            sleep 1
+          done
+        env:
+          PORT: 3000
+          NODE_ENV: production
+
+      - name: 🤖 Generar casos de prueba (GPT-4o)
+        run: node scripts/generate-tests.js
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-4o
+          OPENAI_MAX_TOKENS: 4000
+          API_BASE_URL: ${{ env.API_BASE_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+
+      - name: 🧪 Ejecutar pruebas (Newman)
+        run: npm run run-tests
+
+      # PASO NUEVO — Inyección de fallos controlada
+      - name: 🐛 Inyección de fallos controlada
+        run: node scripts/inject-faults.js
+        env:
+          FAULT_PORT: 3001
+
+      - name: 📊 Resultado de inyección de fallos
+        run: |
+          if [ -f reports/fault-injection-summary.json ]; then
+            node -e "
+              const r = require('./reports/fault-injection-summary.json');
+              console.log('Fallos inyectados: ', r.faultsInjected);
+              console.log('Fallos detectados: ', r.failuresDetected);
+              console.log('Tasa de deteccion: ', r.detectionRate);
+            "
+          fi
+
+      # PASO NUEVO — Reporte PDF
+      - name: 📄 Generar reporte PDF
+        run: node scripts/generate-pdf-report.js
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF: ${{ github.ref }}
+
+      - name: 📦 Subir artefactos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-run${{ github.run_number }}
+          path: |
+            reports/
+            postman/collection.json
+            swagger-output.json
+          retention-days: 30
+
+      - name: ☁️ Subir resultados a S3
+        if: always()
+        run: |
+          node -e "
+            require('dotenv').config();
+            const { uploadToS3 } = require('./src/utils/s3-uploader');
+            const fs = require('fs');
+            const ts = new Date().toISOString().replace(/[:.]/g, '-');
+            const run = '${{ github.run_number }}';
+            const files = [
+              ['reports/newman-report.json',           'newman-reports/run-' + run + '-' + ts + '.json'],
+              ['reports/fault-injection-summary.json', 'fault-reports/run-'  + run + '-' + ts + '.json'],
+              ['reports/metrics-report.pdf',           'pdf-reports/run-'    + run + '-' + ts + '.pdf'],
+              ['swagger-output.json',                  'swagger-specs/run-'  + run + '-' + ts + '.json'],
+            ];
+            Promise.all(
+              files.filter(([s]) => fs.existsSync(s)).map(([s,d]) => uploadToS3(s,d))
+            ).then(() => console.log('Archivos subidos a S3')).catch(e => console.warn('S3:', e.message));
+          "
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+
+      - name: 📈 Resumen final del pipeline
+        if: always()
+        run: |
+          echo "═══════════════════════════════════════"
+          echo "        RESUMEN DEL PIPELINE           "
+          echo "═══════════════════════════════════════"
+          node -e "
+            const fs = require('fs');
+            const load = f => fs.existsSync(f) ? JSON.parse(fs.readFileSync(f,'utf8')) : null;
+            const gen = load('reports/generation-metrics.json');
+            const nm  = load('reports/newman-report.json');
+            const fi  = load('reports/fault-injection-summary.json');
+            if (gen) {
+              console.log('Endpoints (swagger): ' + gen.apiEndpoints);
+              console.log('Casos generados:     ' + gen.casesGenerated);
+              console.log('Tiempo generacion:   ' + gen.generationDurationSeconds + 's');
+              console.log('Tokens consumidos:   ' + (gen.tokensUsed?.total_tokens||'?'));
+            }
+            if (nm) {
+              const s = nm.run?.stats || {};
+              const tot = s.assertions?.total || 0;
+              const fail = s.assertions?.failed || 0;
+              const pct = tot ? (((tot-fail)/tot)*100).toFixed(1) : 0;
+              console.log('Assertions totales:  ' + tot);
+              console.log('Tasa de exito:       ' + pct + '%');
+            }
+            if (fi) console.log('Tasa deteccion:      ' + fi.detectionRate);
+          " || true
+          echo "═══════════════════════════════════════"
+
+  analyze-metrics:
+    name: 📊 Análisis y dashboard
+    needs: generate-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && always()
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 📦 Instalar dependencias
+        run: npm ci
+
+      - name: 📥 Descargar artefactos
+        uses: actions/download-artifact@v4
+        with:
+          name: test-reports-run${{ github.run_number }}
+          path: reports/
+
+      - name: 📊 Generar reporte consolidado
+        run: node scripts/analyze-metrics.js
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF: ${{ github.ref }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+
+      # ── Resumen estadístico del experimento acumulado ────────────────
+      # Corre después de cada push para tener el análisis siempre actualizado.
+      # Con pocas iteraciones los IC serán amplios; se vuelven más precisos
+      # conforme se acumulan runs. El resultado queda en reports/ y en S3.
+      - name: 📐 Resumen estadístico del experimento
+        run: node scripts/summarize-experiment.js
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+
+      - name: 📦 Subir resumen estadístico como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: experiment-summary-run${{ github.run_number }}
+          path: |
+            reports/experiment-summary.json
+            reports/experiment-summary.md
+          retention-days: 90
+
+      - name: ☁️ Subir resumen estadístico a S3
+        run: |
+          node -e "
+            require('dotenv').config();
+            const { uploadToS3 } = require('./src/utils/s3-uploader');
+            const fs = require('fs');
+            Promise.all([
+              uploadToS3('reports/experiment-summary.json', 'experiment/summary.json'),
+              uploadToS3('reports/experiment-summary.md',   'experiment/summary.md'),
+            ]).then(() => console.log('Resumen estadístico subido a S3'))
+              .catch(e => console.warn('S3:', e.message));
+          "
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+
+      # ── Publicar dashboard en S3 ─────────────────────────────────────
+      - name: 🌐 Publicar dashboard en S3
+        run: |
+          node -e "
+            require('dotenv').config();
+            const { uploadToS3 } = require('./src/utils/s3-uploader');
+            uploadToS3('dashboard/index.html', 'dashboard/index.html')
+              .then(() => console.log('Dashboard publicado en S3'))
+              .catch(e => console.warn('S3:', e.message));
+          "
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
+
+      # ── Publicar en GitHub Pages ──────────────────────────────────────
+      # Copia el dashboard a docs/ con el historial embebido como variable
+      # JavaScript para que funcione sin depender de fetch a S3.
+      # GitHub Pages sirve docs/ como sitio web público automáticamente.
+      - name: 🚀 Publicar en GitHub Pages
+        run: |
+          node -e "
+            const fs = require('fs');
+
+            // Leer historial local (ya descargado por analyze-metrics)
+            const histPath = 'reports/runs-history.json';
+            const history  = fs.existsSync(histPath)
+              ? fs.readFileSync(histPath, 'utf8')
+              : '[]';
+
+            // Leer el dashboard HTML
+            let html = fs.readFileSync('dashboard/index.html', 'utf8');
+
+            // Inyectar el historial como variable global antes del cierre de </body>
+            // El dashboard detecta EMBEDDED_HISTORY y lo usa en lugar del fetch a S3
+            const injection = '<script>window.EMBEDDED_HISTORY = ' + history + ';</script>';
+            html = html.replace('</body>', injection + '\n</body>');
+
+            // Guardar en docs/index.html (carpeta que sirve GitHub Pages)
+            fs.mkdirSync('docs', { recursive: true });
+            fs.writeFileSync('docs/index.html', html);
+            console.log('docs/index.html generado con historial embebido');
+          "
+
+      # Commit y push de docs/ para que GitHub Pages lo sirva
+      - name: 📤 Commit docs/ a main
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          # Solo hace commit si hay cambios
+          git diff --staged --quiet || git commit -m "chore: actualizar dashboard GitHub Pages [run ${{ github.run_number }}]"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
