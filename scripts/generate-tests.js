@@ -49,15 +49,20 @@ async function generateTestsWithLLM(openAPISpec) {
 REGLAS ESTRICTAS:
 1. Responde ÚNICAMENTE con JSON válido. Sin texto adicional, sin comentarios, sin markdown.
 2. Genera casos de prueba positivos (happy path) Y negativos (edge cases, validaciones, errores).
-3. Para cada endpoint, incluye al menos:
+3. Para cada endpoint del spec, incluye al menos:
    - 1 caso exitoso (status 2xx)
    - 1 caso con datos inválidos/faltantes (status 4xx)
    - 1 caso de recurso no encontrado donde aplique (status 404)
 4. Cada request debe incluir "tests" en JavaScript para validar status code, tiempo de respuesta y estructura del body.
 5. Usa variables de colección para el baseUrl y para IDs creados dinámicamente.
-6. El JSON debe seguir exactamente el formato de colección de Postman v2.1.`;
+6. El JSON debe seguir exactamente el formato de colección de Postman v2.1.
+7. CRÍTICO: Usa las URLs EXACTAS del spec OpenAPI. Por ejemplo, si el spec dice "/api/users", el request debe ir a "{{baseUrl}}/api/users", NUNCA a "{{baseUrl}}/" ni a rutas genéricas. Cada request DEBE incluir la ruta completa del endpoint incluyendo el prefijo /api/.
+8. Para endpoints con parámetros de ruta como /api/users/{id}, usa el ID guardado dinámicamente en la variable de colección o un ID numérico concreto como 1, 2 o 99999 (para casos 404).
+9. NUNCA generes rutas genéricas como "/" o "/{id}". Siempre usa la ruta completa del spec.`;
 
   const userPrompt = `Genera una colección de Postman completa para la siguiente API REST.
+
+IMPORTANTE: Lee el spec completo. Cada endpoint tiene una ruta específica como /api/users, /api/products, /api/orders. Usa esas rutas EXACTAS en cada request. NO uses rutas genéricas.
 
 OpenAPI Spec:
 ${JSON.stringify(openAPISpec, null, 2)}
@@ -65,11 +70,23 @@ ${JSON.stringify(openAPISpec, null, 2)}
 La colección debe:
 - Llamarse "API Test Generator - Colección Automática (${new Date().toISOString()})"
 - Tener una variable de colección "baseUrl" con valor "${API_BASE_URL}"
-- Organizar los requests por carpetas (una por cada tag/recurso)
-- Incluir scripts de test en cada request para validar: status code, tiempo de respuesta (<2000ms), y estructura básica del JSON de respuesta
-- Los casos POST deben guardar el ID creado en una variable de entorno para usarlo en los siguientes requests (GET/:id, PUT/:id, DELETE/:id)
+- Organizar los requests por carpetas: una para Users (/api/users), una para Products (/api/products), una para Orders (/api/orders)
+- En cada request, la URL debe ser "{{baseUrl}}/api/users", "{{baseUrl}}/api/products/{{productId}}", etc. NUNCA "{{baseUrl}}/" ni "{{baseUrl}}/{{id}}"
+- Incluir scripts de test en cada request para validar: status code esperado, tiempo de respuesta (<2000ms), y estructura del JSON de respuesta
+- Los casos POST deben guardar el ID creado en una variable de colección (ej: pm.collectionVariables.set('userId', json.id)) para usarlo en los siguientes requests GET, PUT, DELETE
+- Para casos 404, usar IDs que no existen como 99999
 
-Formato de salida esperado (colección Postman v2.1):
+Ejemplo de un request correcto:
+{
+  "name": "GET /api/users - Listar todos",
+  "request": {
+    "method": "GET",
+    "url": "{{baseUrl}}/api/users"
+  },
+  "event": [{"listen":"test","script":{"exec":["pm.test('Status 200', () => pm.response.to.have.status(200));"]}}]
+}
+
+Formato de salida (Postman v2.1):
 {
   "info": { "name": "...", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
   "variable": [{ "key": "baseUrl", "value": "${API_BASE_URL}" }],
@@ -78,7 +95,7 @@ Formato de salida esperado (colección Postman v2.1):
 
   const response = await openai.chat.completions.create({
     model: MODEL,
-    max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS) || 4000,
+    max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS) || 16000,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
