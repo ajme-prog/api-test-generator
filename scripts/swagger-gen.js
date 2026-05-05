@@ -86,9 +86,17 @@ console.log('📐 Generando contrato OpenAPI desde el código fuente...');
 swaggerAutogen(outputFile, endpointsFiles, doc).then(({ success }) => {
   if (success) {
     const spec = require(outputFile);
-    const endpointCount = Object.keys(spec.paths || {}).length;
+    const paths = spec.paths || {};
+    const pathCount = Object.keys(paths).length;
+    // Contar endpoints individuales (cada combinación método+ruta)
+    let endpointCount = 0;
+    for (const path of Object.values(paths)) {
+      const methods = ['get','post','put','patch','delete','head','options'];
+      endpointCount += Object.keys(path).filter(k => methods.includes(k)).length;
+    }
     console.log(`✅ Contrato generado: ${outputFile}`);
-    console.log(`   Endpoints detectados: ${endpointCount}`);
+    console.log(`   Paths detectados: ${pathCount}`);
+    console.log(`   Endpoints (método+ruta): ${endpointCount}`);
     console.log('   El contrato refleja el estado actual del código.\n');
   } else {
     console.error('❌ swagger-autogen falló');

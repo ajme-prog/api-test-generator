@@ -598,17 +598,27 @@ function loadDemo() {
 }
 
 // ─── Auto-carga desde historial embebido (GitHub Pages) ───────────────────
-// El pipeline inyecta window.EMBEDDED_HISTORY antes de publicar en GitHub Pages.
-// Si existe, carga automáticamente sin pedir URL al usuario.
-;(function autoLoad() {
+// El pipeline inyecta window.EMBEDDED_HISTORY antes de </body> en GitHub Pages.
+// Puede cargarse antes o después de este script, así que verificamos en ambos momentos.
+function tryAutoLoad() {
   if (window.EMBEDDED_HISTORY && Array.isArray(window.EMBEDDED_HISTORY) && window.EMBEDDED_HISTORY.length > 0) {
     document.getElementById('url-input').value = '(historial embebido automáticamente)';
     document.getElementById('url-input').disabled = true;
     document.querySelector('.btn-primary').disabled = true;
     document.getElementById('live-badge').textContent = 'GitHub Pages — datos en vivo';
     render(window.EMBEDDED_HISTORY);
+    return true;
   }
-})();
+  return false;
+}
+
+// Intentar inmediatamente
+if (!tryAutoLoad()) {
+  // Si no estaba listo, reintentar cuando el DOM termine de cargar
+  window.addEventListener('DOMContentLoaded', tryAutoLoad);
+  // Y también un fallback con setTimeout por si el script inyectado carga tarde
+  setTimeout(tryAutoLoad, 500);
+}
 </script>
 </body>
 </html>

@@ -60,9 +60,9 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`\nAPI corriendo en http://localhost:${PORT}`);
-  console.log(`Swagger UI:   http://localhost:${PORT}/api-docs`);
-  console.log(`OpenAPI JSON: http://localhost:${PORT}/api-docs.json\n`);
+  console.log(`\n🚀 API corriendo en http://localhost:${PORT}`);
+  console.log(`📄 Swagger UI:   http://localhost:${PORT}/api-docs`);
+  console.log(`📦 OpenAPI JSON: http://localhost:${PORT}/api-docs.json\n`);
 });
 
 module.exports = app;

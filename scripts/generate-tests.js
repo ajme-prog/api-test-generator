@@ -215,7 +215,15 @@ async function main() {
       generationDurationSeconds: parseFloat(duration),
       casesGenerated: requestCount,
       tokensUsed: usage,
-      apiEndpoints: Object.keys(openAPISpec.paths || {}).length,
+      apiEndpoints: (() => {
+        const paths = openAPISpec.paths || {};
+        const methods = ['get','post','put','patch','delete','head','options'];
+        let count = 0;
+        for (const p of Object.values(paths)) {
+          count += Object.keys(p).filter(k => methods.includes(k)).length;
+        }
+        return count;
+      })(),
       sourceApi: openAPISpec.info?.title,
     };
 
