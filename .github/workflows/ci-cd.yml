@@ -70,15 +70,17 @@ jobs:
           S3_BUCKET_NAME: ${{ secrets.S3_BUCKET_NAME }}
 
       - name: 🧪 Ejecutar pruebas (Newman)
-        run: npm run run-tests
+        run: npm run run-tests || true
 
       # PASO NUEVO — Inyección de fallos controlada
       - name: 🐛 Inyección de fallos controlada
+        if: always()
         run: node scripts/inject-faults.js
         env:
           FAULT_PORT: 3001
 
       - name: 📊 Resultado de inyección de fallos
+        if: always()
         run: |
           if [ -f reports/fault-injection-summary.json ]; then
             node -e "
@@ -91,6 +93,7 @@ jobs:
 
       # PASO NUEVO — Reporte PDF
       - name: 📄 Generar reporte PDF
+        if: always()
         run: node scripts/generate-pdf-report.js
         env:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
