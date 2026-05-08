@@ -347,8 +347,8 @@ async function main() {
   console.log('▶️  Ejecutando Newman contra servidor con fallos...\n');
   let newmanExitCode = 0;
   try {
-    execSync(
-      `npx newman run ${tmpCollection} --reporters cli,json --reporter-json-export ${faultReportPath} --bail`,
+execSync(
+  `npx newman run ${tmpCollection} --reporters cli,json --reporter-json-export ${faultReportPath} --timeout-request 5000`,
       { stdio: 'inherit' }
     );
   } catch (e) {
