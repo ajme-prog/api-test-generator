@@ -14,11 +14,12 @@ const path = require('path');
 
 const outputFile = path.join(__dirname, '../swagger-output.json');
 
-// Archivos donde están definidas las rutas (swagger-autogen las escanea)
+// Apuntar a index.js que es donde se montan las rutas con sus prefijos
+// (/api/users, /api/products, /api/orders). Si se apunta directamente
+// a los archivos de rutas, swagger-autogen no detecta los prefijos
+// y genera paths genéricos como "/" en lugar de "/api/users".
 const endpointsFiles = [
-  path.join(__dirname, '../src/routes/users.js'),
-  path.join(__dirname, '../src/routes/products.js'),
-  path.join(__dirname, '../src/routes/orders.js'),
+  path.join(__dirname, '../src/index.js'),
 ];
 
 const doc = {

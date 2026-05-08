@@ -170,7 +170,7 @@ jobs:
     name: 📊 Análisis y dashboard
     needs: generate-and-test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && always()
+    if: github.ref == 'refs/heads/main' && success()
 
     steps:
       - name: 📥 Checkout
