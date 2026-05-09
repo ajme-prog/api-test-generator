@@ -62,7 +62,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: gpt-4o
-          OPENAI_MAX_TOKENS: 4000
+          OPENAI_MAX_TOKENS: 16000
           API_BASE_URL: ${{ env.API_BASE_URL }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
