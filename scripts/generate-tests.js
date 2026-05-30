@@ -12,7 +12,8 @@
  *
  * CORRECCIÓN v3:
  * - Prompt exhaustivo con lista explícita de endpoints
- * - Máximo 2 casos por endpoint (1 positivo + 1 negativo)
+ * - Generación libre de casos (el modelo decide cantidad según criterio QA)
+ * - Temperatura 0.4 para variación natural entre iteraciones
  * - Elimina redundancia por diseño
  * - max_tokens ajustado a 16384 (límite máximo de gpt-4o)
  */
@@ -51,7 +52,7 @@ async function fetchOpenAPISpec() {
  */
 function extractEndpointList(openAPISpec) {
   const httpMethods = ['get','post','put','patch','delete'];
-  const excluded    = ['/api-docs.json'];
+  const excluded    = ['/api-docs.json', '/health'];
   const endpoints   = [];
 
   for (const [routePath, methods] of Object.entries(openAPISpec.paths || {})) {
@@ -80,7 +81,10 @@ async function generateTestsWithLLM(openAPISpec) {
 REGLAS CRÍTICAS:
 1. Responde ÚNICAMENTE con JSON válido. Sin texto, sin comentarios, sin markdown.
 2. COBERTURA OBLIGATORIA: genera casos para TODOS los ${totalEndpoints} endpoints de la lista. Sin excepción.
-3. MÁXIMO 2 CASOS POR ENDPOINT: 1 exitoso (2xx) + 1 negativo (4xx). No generes un tercero.
+3. Para cada endpoint, genera los casos de prueba que consideres necesarios:
+   - Caso exitoso (status 2xx) — obligatorio para cada endpoint
+   - Casos negativos: datos inválidos, campos faltantes, IDs inexistentes (99999), valores fuera de rango (cero, negativos), formatos incorrectos
+   Usa tu criterio profesional de QA para decidir cuántos y cuáles casos negativos son relevantes para cada endpoint.
 4. ORDEN DE EJECUCIÓN OBLIGATORIO dentro de cada carpeta:
    a) Primero: POST exitoso → DEBE guardar el ID con pm.collectionVariables.set()
    b) Luego: GET, PUT, PATCH exitosos usando {{userId}}, {{productId}} o {{orderId}}
@@ -126,7 +130,7 @@ Formato Postman v2.1:
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userPrompt   },
     ],
-    temperature: 0.2,
+    temperature: 0.4,
   });
 
   const rawContent = response.choices[0].message.content.trim();
@@ -234,15 +238,7 @@ async function main() {
       generationDurationSeconds: parseFloat(duration),
       casesGenerated: requestCount,
       tokensUsed: usage,
-      apiEndpoints: (() => {
-        const paths   = openAPISpec.paths || {};
-        const methods = ['get','post','put','patch','delete'];
-        let count = 0;
-        for (const p of Object.values(paths)) {
-          count += Object.keys(p).filter(k => methods.includes(k)).length;
-        }
-        return count;
-      })(),
+      apiEndpoints: extractEndpointList(openAPISpec).length,
       sourceApi: openAPISpec.info?.title,
     };
 
