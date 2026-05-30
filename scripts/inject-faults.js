@@ -25,6 +25,7 @@ const morgan  = require('morgan');
 const path    = require('path');
 const fs      = require('fs');
 const { execSync } = require('child_process');
+const http = require('http');
 
 // ─────────────────────────────────────────────
 // Catálogo de fallos
@@ -330,18 +331,27 @@ async function main() {
 
   const server = await startFaultyServer(activeIds, PORT);
 
-  // Esperar a que el servidor con fallos esté listo
+  // Esperar a que el servidor con fallos esté listo (usando Node.js nativo)
+  function checkHealth(port) {
+    return new Promise((resolve) => {
+      const req = http.get(`http://localhost:${port}/health`, (res) => {
+        resolve(res.statusCode === 200);
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(2000, () => { req.destroy(); resolve(false); });
+    });
+  }
+  function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
   console.log(`⏳ Esperando que el servidor con fallos esté listo en :${PORT}...`);
   let serverReady = false;
   for (let i = 0; i < 15; i++) {
-    try {
-      execSync(`curl -sf http://localhost:${PORT}/health > /dev/null 2>&1`, { timeout: 2000 });
+    if (await checkHealth(PORT)) {
       serverReady = true;
       console.log(`✅ Servidor con fallos listo (intento ${i + 1})`);
       break;
-    } catch (_) {
-      execSync('sleep 1');
     }
+    await delay(1000);
   }
   if (!serverReady) {
     console.warn('⚠️  Servidor con fallos no respondió — abortando inyección');
