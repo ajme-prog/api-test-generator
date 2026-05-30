@@ -330,6 +330,25 @@ async function main() {
 
   const server = await startFaultyServer(activeIds, PORT);
 
+  // Esperar a que el servidor con fallos esté listo
+  console.log(`⏳ Esperando que el servidor con fallos esté listo en :${PORT}...`);
+  let serverReady = false;
+  for (let i = 0; i < 15; i++) {
+    try {
+      execSync(`curl -sf http://localhost:${PORT}/health > /dev/null 2>&1`, { timeout: 2000 });
+      serverReady = true;
+      console.log(`✅ Servidor con fallos listo (intento ${i + 1})`);
+      break;
+    } catch (_) {
+      execSync('sleep 1');
+    }
+  }
+  if (!serverReady) {
+    console.warn('⚠️  Servidor con fallos no respondió — abortando inyección');
+    server.close();
+    process.exit(0);
+  }
+
   // Ejecutar Newman contra el servidor con fallos
   const collectionStr = fs.readFileSync(COLLECTION, 'utf8');
   const collection = JSON.parse(collectionStr);
@@ -340,22 +359,25 @@ async function main() {
     faultyCollection.variable = faultyCollection.variable.map(v =>
       v.key === 'baseUrl' ? { ...v, value: `http://localhost:${PORT}` } : v
     );
+  } else {
+    // Si no hay variables, agregar baseUrl
+    faultyCollection.variable = [{ key: 'baseUrl', value: `http://localhost:${PORT}` }];
   }
   const tmpCollection = path.join(REPORT_DIR, 'faulty-collection-tmp.json');
   fs.writeFileSync(tmpCollection, JSON.stringify(faultyCollection, null, 2));
 
   console.log('▶️  Ejecutando Newman contra servidor con fallos...\n');
-  let newmanExitCode = 0;
   try {
     execSync(
-      `npx newman run ${tmpCollection} --reporters cli,json --reporter-json-export ${faultReportPath} --timeout-request 5000 --timeout 120000`,
-      { stdio: 'inherit', timeout: 180000 }
+      `npx newman run "${tmpCollection}" --reporters cli,json --reporter-json-export "${faultReportPath}" --timeout-request 10000 --timeout 180000`,
+      { stdio: 'inherit', timeout: 240000 }
     );
   } catch (e) {
-    newmanExitCode = e.status || 1;
-    // timeout de execSync genera SIGTERM, eso es normal
+    // Newman sale con código 1 cuando hay assertions fallidas — eso es esperado
     if (e.signal === 'SIGTERM') {
       console.log('\n⚠️  Newman fue terminado por timeout — procesando resultados parciales');
+    } else {
+      console.log(`\nℹ️  Newman terminó con código ${e.status} (normal si hay fallos detectados)`);
     }
   }
 

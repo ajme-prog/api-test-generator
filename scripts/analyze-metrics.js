@@ -138,11 +138,21 @@ async function main() {
   const totalDurationMs = timings.completed ? (timings.completed - timings.started) : 0;
 
   // ── Cobertura de endpoints ────────────────────────────────────────────
+  // Normaliza segmentos de ruta que son IDs concretos (numéricos o UUIDs)
+  // a ":param" para que GET /api/users/1 y GET /api/users/99999 se
+  // consideren el mismo endpoint y no inflen el conteo de cobertura.
+  function normalizePathSegment(seg) {
+    if (/^\d+$/.test(seg)) return ':param';
+    if (/^[0-9a-f-]{8,}$/i.test(seg)) return ':param';
+    return seg;
+  }
+
   const endpointsTested = new Set();
   execs.forEach(e => {
-    const url    = e.request?.url?.path?.join('/');
-    const method = e.request?.method;
-    if (url && method) endpointsTested.add(`${method}/${url}`);
+    const segments   = e.request?.url?.path || [];
+    const normalized = segments.map(normalizePathSegment).join('/');
+    const method     = e.request?.method;
+    if (normalized && method) endpointsTested.add(`${method}/${normalized}`);
   });
   const totalEndpoints   = generation?.apiEndpoints || 0;
   const coveredEndpoints = endpointsTested.size;
