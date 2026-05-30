@@ -449,8 +449,9 @@ if d['faults']:
     story+=[PageBreak(),Paragraph('4. Inyeccion de Fallos Controlada',SH1),hr(),sp(8),
         Paragraph(
             f'Se inyectaron <b>{f["faultsInjected"]} fallos controlados</b> en la API. '
-            f'La suite GPT-4o detecto <b>{f["failuresDetected"]} fallos</b> de '
-            f'<b>{f["assertionsTotal"]} assertions</b>: '
+            f'La suite GPT-4o detecto <b>{f.get("faultsDetected", f.get("failuresDetected", 0))}</b> de '
+            f'<b>{f["faultsInjected"]} fallos inyectados</b> '
+            f'(<b>{f.get("assertionsFailed", f.get("failuresDetected", 0))}</b> assertions fallidas de {f["assertionsTotal"]}): '
             f'<b>tasa de deteccion = {f["detectionRate"]}</b>.',SB),sp(8)]
     if f.get('faultsCatalog'):
         rows=[['#','Tipo','Descripcion']]
