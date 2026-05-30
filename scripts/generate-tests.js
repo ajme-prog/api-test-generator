@@ -10,10 +10,11 @@
  * de casos de prueba en APIs REST mediante modelos de lenguaje
  * integrados en pipelines CI/CD"
  *
- * CORRECCIÓN v2:
- * - Prompt mejorado con instrucción de exhaustividad explícita
- * - El modelo recibe la lista exacta de endpoints antes de generar
- * - Se instruye a no duplicar endpoints ya cubiertos
+ * CORRECCIÓN v3:
+ * - Prompt exhaustivo con lista explícita de endpoints
+ * - Máximo 2 casos por endpoint (1 positivo + 1 negativo)
+ * - Elimina redundancia por diseño
+ * - max_tokens ajustado a 16384 (límite máximo de gpt-4o)
  */
 
 require('dotenv').config();
@@ -25,8 +26,8 @@ const { uploadToS3 } = require('../src/utils/s3-uploader');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const API_BASE_URL  = process.env.API_BASE_URL  || 'http://localhost:3000';
-const MODEL         = process.env.OPENAI_MODEL  || 'gpt-4o';
+const API_BASE_URL   = process.env.API_BASE_URL  || 'http://localhost:3000';
+const MODEL          = process.env.OPENAI_MODEL  || 'gpt-4o';
 const POSTMAN_OUTPUT = path.join(__dirname, '../postman/collection.json');
 
 // ─────────────────────────────────────────────
@@ -45,12 +46,16 @@ async function fetchOpenAPISpec() {
 
 /**
  * Extrae la lista exacta de METHOD + PATH del spec OpenAPI.
- * Se usa para construir el prompt de exhaustividad.
+ * Excluye endpoints de infraestructura (/api-docs.json)
+ * que no son parte del contrato funcional de la API.
  */
 function extractEndpointList(openAPISpec) {
-  const httpMethods = ['get','post','put','patch','delete','head','options'];
-  const endpoints = [];
+  const httpMethods = ['get','post','put','patch','delete'];
+  const excluded    = ['/api-docs.json'];
+  const endpoints   = [];
+
   for (const [routePath, methods] of Object.entries(openAPISpec.paths || {})) {
+    if (excluded.includes(routePath)) continue;
     for (const method of Object.keys(methods)) {
       if (httpMethods.includes(method.toLowerCase())) {
         endpoints.push(`${method.toUpperCase()} ${routePath}`);
@@ -66,56 +71,54 @@ function extractEndpointList(openAPISpec) {
 async function generateTestsWithLLM(openAPISpec) {
   console.log(`\n🤖 Enviando spec a ${MODEL} para generar casos de prueba...`);
 
-  const endpointList = extractEndpointList(openAPISpec);
+  const endpointList    = extractEndpointList(openAPISpec);
   const endpointListStr = endpointList.map((e, i) => `  ${i + 1}. ${e}`).join('\n');
+  const totalEndpoints  = endpointList.length;
 
-  const systemPrompt = `Eres un experto en QA y pruebas de APIs REST. Tu tarea es generar una colección de Postman completa y lista para ejecutar con Newman.
+  const systemPrompt = `Eres un experto en QA y pruebas de APIs REST. Generas colecciones Postman listas para Newman.
 
-REGLAS ESTRICTAS:
-1. Responde ÚNICAMENTE con JSON válido. Sin texto adicional, sin comentarios, sin markdown.
-2. EXHAUSTIVIDAD OBLIGATORIA: Debes generar al menos un caso de prueba para CADA endpoint de la lista que recibirás. No puedes omitir ninguno. Antes de terminar, verifica que todos los endpoints estén cubiertos.
-3. Para cada endpoint genera:
-   - 1 caso exitoso (status 2xx) — happy path
-   - 1 caso con datos inválidos o faltantes (status 4xx) donde aplique
-   - 1 caso de recurso no encontrado (status 404) para endpoints con parámetro /{id}
-4. NO dupliques el mismo endpoint+método más de 2 veces. Si ya tienes un caso positivo y uno negativo para un endpoint, no agregues un tercero del mismo tipo.
-5. Cada request debe incluir scripts de test en JavaScript para validar: status code esperado, tiempo de respuesta (<2000ms) y estructura básica del body.
-6. Usa variables de colección para baseUrl e IDs creados dinámicamente.
-7. El JSON debe seguir exactamente el formato de colección Postman v2.1.
-8. Usa las URLs EXACTAS del spec. Si el spec dice "/api/users/{id}", el request debe ir a "{{baseUrl}}/api/users/{{userId}}" o "{{baseUrl}}/api/users/1".
-9. Los casos POST deben guardar el ID creado en una variable: pm.collectionVariables.set('userId', pm.response.json().id)
-10. Para casos 404, usa IDs inexistentes como 99999.`;
+REGLAS — LEER ANTES DE GENERAR:
+1. Responde ÚNICAMENTE con JSON válido. Sin texto, sin comentarios, sin markdown.
+2. COBERTURA OBLIGATORIA: genera casos para TODOS los ${totalEndpoints} endpoints de la lista. Sin excepción.
+3. MÁXIMO 2 CASOS POR ENDPOINT:
+   - Caso 1: exitoso (status 2xx)
+   - Caso 2: negativo (status 4xx) — datos inválidos, faltantes, o ID inexistente
+   NO generes un tercer caso para ningún endpoint.
+4. Cada request incluye script de test que valida: status code y tiempo de respuesta (<2000ms).
+5. Usa "{{baseUrl}}" para la URL base y variables de colección para IDs dinámicos.
+6. Formato exacto: colección Postman v2.1.
+7. URLs EXACTAS del spec. Nunca rutas genéricas.
+8. Los POST guardan el ID: pm.collectionVariables.set('userId', pm.response.json().id)
+9. Para casos 404 usa ID 99999.
+10. El JSON debe estar completo y bien cerrado. No lo cortes.`;
 
-  const userPrompt = `Genera una colección de Postman completa para la siguiente API REST.
+  const userPrompt = `Genera una colección Postman para esta API REST.
 
-PASO 1 — LISTA COMPLETA DE ENDPOINTS A CUBRIR (obligatorio cubrir TODOS):
+ENDPOINTS A CUBRIR (${totalEndpoints} en total — cubre TODOS, máximo 2 casos cada uno):
 ${endpointListStr}
 
-PASO 2 — Para cada endpoint de la lista anterior, genera los casos de prueba indicados en las reglas.
-Verifica al finalizar que cada número de la lista tenga al menos un caso generado.
-
-OpenAPI Spec completo:
+OpenAPI Spec:
 ${JSON.stringify(openAPISpec, null, 2)}
 
-La colección debe:
-- Llamarse "API Test Generator - Colección Automática (${new Date().toISOString()})"
-- Tener una variable de colección "baseUrl" con valor "${API_BASE_URL}"
-- Organizar los requests en carpetas por recurso: Users, Products, Orders
-- Incluir scripts de test en cada request
+Colección:
+- Nombre: "API Test Generator - Colección Automática (${new Date().toISOString()})"
+- Variable: "baseUrl" = "${API_BASE_URL}"
+- Carpetas: Users, Products, Orders
+- Exactamente 2 casos por endpoint: 1 exitoso + 1 negativo
 
-Formato de salida (Postman v2.1):
+Formato de salida:
 {
   "info": { "name": "...", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
   "variable": [{ "key": "baseUrl", "value": "${API_BASE_URL}" }],
-  "item": [ ... carpetas con requests ... ]
+  "item": [ ... carpetas ... ]
 }`;
 
   const response = await openai.chat.completions.create({
     model: MODEL,
-    max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS) || 16000,
+    max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS) || 16384,
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user',   content: userPrompt },
+      { role: 'user',   content: userPrompt   },
     ],
     temperature: 0.2,
   });
@@ -125,6 +128,11 @@ Formato de salida (Postman v2.1):
 
   console.log(`✅ GPT-4o generó respuesta (${rawContent.length} caracteres)`);
   console.log(`📊 Tokens usados: prompt=${response.usage.prompt_tokens}, completion=${response.usage.completion_tokens}, total=${response.usage.total_tokens}`);
+
+  // Advertir si se acercó al límite
+  if (response.usage.completion_tokens >= 15000) {
+    console.warn(`⚠️  Completion tokens (${response.usage.completion_tokens}) cerca del límite. Verificar JSON completo.`);
+  }
 
   return { raw: cleaned, usage: response.usage };
 }
@@ -184,7 +192,7 @@ async function saveResults(collection, metrics) {
   if (process.env.AWS_ACCESS_KEY_ID && process.env.S3_BUCKET_NAME) {
     try {
       await uploadToS3(POSTMAN_OUTPUT, `collections/collection-${metrics.timestamp}.json`);
-      await uploadToS3(metricsPath, `metrics/generation-${metrics.timestamp}.json`);
+      await uploadToS3(metricsPath,    `metrics/generation-${metrics.timestamp}.json`);
       console.log('☁️  Resultados subidos a S3');
     } catch (err) {
       console.warn(`⚠️  No se pudo subir a S3: ${err.message}`);
@@ -209,7 +217,7 @@ async function main() {
     const collection = parseAndEnrichCollection(raw, openAPISpec);
 
     const requestCount = countRequests(collection);
-    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    const duration     = ((Date.now() - startTime) / 1000).toFixed(2);
 
     console.log(`\n📋 Casos de prueba generados: ${requestCount}`);
     console.log(`⏱️  Tiempo de generación: ${duration}s`);
@@ -222,7 +230,7 @@ async function main() {
       tokensUsed: usage,
       apiEndpoints: (() => {
         const paths   = openAPISpec.paths || {};
-        const methods = ['get','post','put','patch','delete','head','options'];
+        const methods = ['get','post','put','patch','delete'];
         let count = 0;
         for (const p of Object.values(paths)) {
           count += Object.keys(p).filter(k => methods.includes(k)).length;
