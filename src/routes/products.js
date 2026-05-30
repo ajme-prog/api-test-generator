@@ -56,6 +56,32 @@ router.get('/', (req, res) => {
 
 /**
  * @openapi
+ * /api/products/search:
+ *   get:
+ *     summary: Buscar productos por nombre
+ *     tags: [Products]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Término de búsqueda
+ *     responses:
+ *       200:
+ *         description: Productos encontrados
+ *       400:
+ *         description: Parámetro requerido
+ */
+router.get('/search', (req, res) => {
+  const { q } = req.query;
+  if (!q) return res.status(400).json({ error: 'El parámetro q es requerido' });
+  const results = products.filter(p => p.name.toLowerCase().includes(q.toLowerCase()));
+  res.json(results);
+});
+
+/**
+ * @openapi
  * /api/products/{id}:
  *   get:
  *     summary: Obtener producto por ID

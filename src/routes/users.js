@@ -41,6 +41,46 @@ router.get('/', (req, res) => {
 
 /**
  * @openapi
+ * /api/users/search:
+ *   get:
+ *     summary: Buscar usuarios por nombre
+ *     tags: [Users]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Término de búsqueda
+ *     responses:
+ *       200:
+ *         description: Usuarios encontrados
+ *       400:
+ *         description: Parámetro requerido
+ */
+router.get('/search', (req, res) => {
+  const { q } = req.query;
+  if (!q) return res.status(400).json({ error: 'El parámetro q es requerido' });
+  const results = users.filter(u => u.name.toLowerCase().includes(q.toLowerCase()));
+  res.json(results);
+});
+
+/**
+ * @openapi
+ * /api/users/count:
+ *   get:
+ *     summary: Obtener cantidad total de usuarios
+ *     tags: [Users]
+ *     responses:
+ *       200:
+ *         description: Cantidad de usuarios
+ */
+router.get('/count', (req, res) => {
+  res.json({ count: users.length });
+});
+
+/**
+ * @openapi
  * /api/users/{id}:
  *   get:
  *     summary: Obtener un usuario por ID

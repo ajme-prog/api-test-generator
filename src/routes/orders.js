@@ -41,6 +41,23 @@ router.get('/', (req, res) => {
 
 /**
  * @openapi
+ * /api/orders/stats:
+ *   get:
+ *     summary: Obtener estadísticas de órdenes
+ *     tags: [Orders]
+ *     responses:
+ *       200:
+ *         description: Estadísticas generales de órdenes
+ */
+router.get('/stats', (req, res) => {
+  const total = orders.length;
+  const byStatus = {};
+  orders.forEach(o => { byStatus[o.status] = (byStatus[o.status] || 0) + 1; });
+  res.json({ total, byStatus });
+});
+
+/**
+ * @openapi
  * /api/orders/{id}:
  *   get:
  *     summary: Obtener orden por ID

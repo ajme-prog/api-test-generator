@@ -76,7 +76,7 @@ async function generateTestsWithLLM(openAPISpec) {
   const endpointListStr = endpointList.map((e, i) => `  ${i + 1}. ${e}`).join('\n');
   const totalEndpoints  = endpointList.length;
 
-  const systemPrompt = `Eres un experto en QA y pruebas de APIs REST. Generas colecciones Postman listas para Newman.
+const systemPrompt = `Eres un experto en QA y pruebas de APIs REST. Generas colecciones Postman listas para Newman.
 
 REGLAS CRÍTICAS:
 1. Responde ÚNICAMENTE con JSON válido. Sin texto, sin comentarios, sin markdown.
@@ -85,20 +85,21 @@ REGLAS CRÍTICAS:
    - Caso exitoso (status 2xx) — obligatorio para cada endpoint
    - Casos negativos: datos inválidos, campos faltantes, IDs inexistentes (99999), valores fuera de rango (cero, negativos), formatos incorrectos
    Usa tu criterio profesional de QA para decidir cuántos y cuáles casos negativos son relevantes para cada endpoint.
-4. ORDEN DE EJECUCIÓN OBLIGATORIO dentro de cada carpeta:
+4. Para casos negativos, incluye pruebas de valores de borde: cantidades en cero, precios negativos, cadenas vacías, y valores fuera de los enums permitidos.
+5. ORDEN DE EJECUCIÓN OBLIGATORIO dentro de cada carpeta:
    a) Primero: POST exitoso → DEBE guardar el ID con pm.collectionVariables.set()
    b) Luego: GET, PUT, PATCH exitosos usando {{userId}}, {{productId}} o {{orderId}}
    c) Luego: casos negativos (datos inválidos, IDs inexistentes como 99999)
    d) Último: DELETE exitoso usando el ID guardado
    Este orden es crítico. Si POST no va primero, los demás fallan con 404.
-5. Los POST exitosos DEBEN enviar datos válidos que la API acepte:
+6. Los POST exitosos DEBEN enviar datos válidos que la API acepte:
    - Users: {"name": "Test User", "email": "test@example.com", "role": "user"}
    - Products: {"name": "Test Product", "price": 99.99, "stock": 10, "category": "General"}
    - Orders: {"userId": 1, "productId": 1, "quantity": 2}
-6. Cada request incluye script de test: status code + tiempo de respuesta (<2000ms).
-7. Usa "{{baseUrl}}" para URLs. URLs EXACTAS del spec, nunca rutas genéricas.
-8. Para PATCH /api/orders/{id}/status, usa el orderId guardado por POST, NO un ID hardcodeado.
-9. El JSON debe estar completo y bien cerrado.`;
+7. Cada request incluye script de test: status code + tiempo de respuesta (<2000ms).
+8. Usa "{{baseUrl}}" para URLs. URLs EXACTAS del spec, nunca rutas genéricas.
+9. Para PATCH /api/orders/{id}/status, usa el orderId guardado por POST, NO un ID hardcodeado.
+10. El JSON debe estar completo y bien cerrado.`;
 
   const userPrompt = `Genera una colección Postman para esta API.
 
