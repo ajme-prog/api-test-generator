@@ -400,23 +400,90 @@ async function main() {
   );
   console.log(`\nℹ️  Newman terminó con código ${exitCode} (normal si hay fallos detectados)`);
 
-  // Analizar resultados
-  let detected = 0, total = 0;
+  // ────────────────────────────────────────────────────────────────────────
+  // Analizar resultados: medir cuántos FALLOS INYECTADOS fueron detectados.
+  //
+  // Fórmula estándar en mutation testing / fault injection:
+  //   detectionRate = fallos detectados / fallos inyectados
+  //
+  // Un fallo se considera "detectado" si al menos una assertion falló en
+  // algún request que apunta al endpoint donde se inyectó el fallo.
+  // ────────────────────────────────────────────────────────────────────────
+
+  // Normaliza un endpoint del catálogo: "POST /api/users" → { method, path }
+  function normalizeFaultEndpoint(endpointStr) {
+    const parts  = endpointStr.split(' ');
+    const method = parts[0].toUpperCase();
+    let p = parts.slice(1).join(' ').split('?')[0]; // quitar query string
+    p = p.replace(/:id\b/g, ':param').replace(/:param/g, ':param');
+    return { method, path: p };
+  }
+
+  // Normaliza un path de Newman: ['api','users','1'] → '/api/users/:param'
+  function normalizeNewmanPath(segments) {
+    return '/' + segments.map(s => /^\d+$/.test(s) ? ':param' : s)
+      .join('/').replace(/\/+/g, '/');
+  }
+
+  let faultsDetected     = 0;
+  let assertionsTotal    = 0;
+  let assertionsFailed   = 0;
+  const detectedFaultIds = [];
+
   if (fs.existsSync(faultReportPath)) {
     const report = JSON.parse(fs.readFileSync(faultReportPath, 'utf8'));
     const stats  = report.run?.stats || {};
-    total    = stats.assertions?.total  || 0;
-    detected = stats.assertions?.failed || 0;
+    const execs  = report.run?.executions || [];
+
+    assertionsTotal  = stats.assertions?.total  || 0;
+    assertionsFailed = stats.assertions?.failed || 0;
+
+    // Recopilar los endpoints donde hubo al menos una assertion fallida
+    const failedEndpoints = new Set();
+    for (const exec of execs) {
+      const hasFail = exec.assertions?.some(a => a.error);
+      if (hasFail) {
+        const method = exec.request?.method?.toUpperCase() || '';
+        const segs   = exec.request?.url?.path || [];
+        const path   = normalizeNewmanPath(segs);
+        failedEndpoints.add(`${method} ${path}`);
+      }
+    }
+
+    // Para cada fallo inyectado, verificar si alguna assertion falló
+    // en el endpoint correspondiente
+    const activeFaults = FAULT_CATALOG.filter(f => activeIds.includes(f.id));
+    for (const fault of activeFaults) {
+      const { method, path } = normalizeFaultEndpoint(fault.endpoint);
+      const faultKey = `${method} ${path}`;
+
+      // Verificar si algún endpoint fallido coincide
+      let detected = false;
+      for (const failedKey of failedEndpoints) {
+        if (failedKey === faultKey || failedKey.startsWith(faultKey)) {
+          detected = true;
+          break;
+        }
+      }
+      if (detected) {
+        faultsDetected++;
+        detectedFaultIds.push(fault.id);
+      }
+    }
   }
 
   const faultSummary = {
-    timestamp:       new Date().toISOString(),
-    faultsInjected:  activeIds.length,
-    faultIds:        activeIds,
-    faultsCatalog:   FAULT_CATALOG.filter(f => activeIds.includes(f.id)),
-    assertionsTotal: total,
-    failuresDetected: detected,
-    detectionRate:   total ? ((detected / total) * 100).toFixed(2) + '%' : '0%',
+    timestamp:         new Date().toISOString(),
+    faultsInjected:    activeIds.length,
+    faultsDetected,
+    detectedFaultIds,
+    faultIds:          activeIds,
+    faultsCatalog:     FAULT_CATALOG.filter(f => activeIds.includes(f.id)),
+    assertionsTotal,
+    assertionsFailed,
+    detectionRate:     activeIds.length
+      ? ((faultsDetected / activeIds.length) * 100).toFixed(2) + '%'
+      : '0%',
   };
 
   const summaryPath = path.join(REPORT_DIR, 'fault-injection-summary.json');
@@ -426,8 +493,8 @@ async function main() {
   console.log('  RESULTADO — INYECCIÓN DE FALLOS');
   console.log('═'.repeat(60));
   console.log(`Fallos inyectados:   ${faultSummary.faultsInjected}`);
-  console.log(`Assertions totales:  ${faultSummary.assertionsTotal}`);
-  console.log(`Fallos detectados:   ${faultSummary.failuresDetected}`);
+  console.log(`Fallos detectados:   ${faultSummary.faultsDetected} de ${faultSummary.faultsInjected} [IDs: ${detectedFaultIds.join(', ') || 'ninguno'}]`);
+  console.log(`Assertions totales:  ${faultSummary.assertionsTotal} (${faultSummary.assertionsFailed} fallidas)`);
   console.log(`Tasa de detección:   ${faultSummary.detectionRate}`);
   console.log('═'.repeat(60));
 

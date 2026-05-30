@@ -210,8 +210,10 @@ async function main() {
     },
     faultDetection: faults ? {
       faultsInjected:   faults.faultsInjected,
-      failuresDetected: faults.failuresDetected,
+      faultsDetected:   faults.faultsDetected,
+      detectedFaultIds: faults.detectedFaultIds,
       assertionsTotal:  faults.assertionsTotal,
+      assertionsFailed: faults.assertionsFailed,
       detectionRate:    faults.detectionRate,
     } : null,
     redundancy: redundancy ? {
