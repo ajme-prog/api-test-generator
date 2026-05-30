@@ -142,8 +142,9 @@ async function main() {
   // a ":param" para que GET /api/users/1 y GET /api/users/99999 se
   // consideren el mismo endpoint y no inflen el conteo de cobertura.
   function normalizePathSegment(seg) {
-    if (/^\d+$/.test(seg)) return ':param';
-    if (/^[0-9a-f-]{8,}$/i.test(seg)) return ':param';
+    if (/^\d+$/.test(seg)) return ':param';                // IDs numéricos: 1, 99999
+    if (/^[0-9a-f-]{8,}$/i.test(seg)) return ':param';    // UUIDs
+    if (/^\{\{.*\}\}$/.test(seg)) return ':param';         // Variables Postman: {{userId}}
     return seg;
   }
 

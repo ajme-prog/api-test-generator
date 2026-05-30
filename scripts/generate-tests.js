@@ -77,40 +77,46 @@ async function generateTestsWithLLM(openAPISpec) {
 
   const systemPrompt = `Eres un experto en QA y pruebas de APIs REST. Generas colecciones Postman listas para Newman.
 
-REGLAS — LEER ANTES DE GENERAR:
+REGLAS CRÍTICAS:
 1. Responde ÚNICAMENTE con JSON válido. Sin texto, sin comentarios, sin markdown.
 2. COBERTURA OBLIGATORIA: genera casos para TODOS los ${totalEndpoints} endpoints de la lista. Sin excepción.
-3. MÁXIMO 2 CASOS POR ENDPOINT:
-   - Caso 1: exitoso (status 2xx)
-   - Caso 2: negativo (status 4xx) — datos inválidos, faltantes, o ID inexistente
-   NO generes un tercer caso para ningún endpoint.
-4. Cada request incluye script de test que valida: status code y tiempo de respuesta (<2000ms).
-5. Usa "{{baseUrl}}" para la URL base y variables de colección para IDs dinámicos.
-6. Formato exacto: colección Postman v2.1.
-7. URLs EXACTAS del spec. Nunca rutas genéricas.
-8. Los POST guardan el ID: pm.collectionVariables.set('userId', pm.response.json().id)
-9. Para casos 404 usa ID 99999.
-10. El JSON debe estar completo y bien cerrado. No lo cortes.`;
+3. MÁXIMO 2 CASOS POR ENDPOINT: 1 exitoso (2xx) + 1 negativo (4xx). No generes un tercero.
+4. ORDEN DE EJECUCIÓN OBLIGATORIO dentro de cada carpeta:
+   a) Primero: POST exitoso → DEBE guardar el ID con pm.collectionVariables.set()
+   b) Luego: GET, PUT, PATCH exitosos usando {{userId}}, {{productId}} o {{orderId}}
+   c) Luego: casos negativos (datos inválidos, IDs inexistentes como 99999)
+   d) Último: DELETE exitoso usando el ID guardado
+   Este orden es crítico. Si POST no va primero, los demás fallan con 404.
+5. Los POST exitosos DEBEN enviar datos válidos que la API acepte:
+   - Users: {"name": "Test User", "email": "test@example.com", "role": "user"}
+   - Products: {"name": "Test Product", "price": 99.99, "stock": 10, "category": "General"}
+   - Orders: {"userId": 1, "productId": 1, "quantity": 2}
+6. Cada request incluye script de test: status code + tiempo de respuesta (<2000ms).
+7. Usa "{{baseUrl}}" para URLs. URLs EXACTAS del spec, nunca rutas genéricas.
+8. Para PATCH /api/orders/{id}/status, usa el orderId guardado por POST, NO un ID hardcodeado.
+9. El JSON debe estar completo y bien cerrado.`;
 
-  const userPrompt = `Genera una colección Postman para esta API REST.
+  const userPrompt = `Genera una colección Postman para esta API.
 
-ENDPOINTS A CUBRIR (${totalEndpoints} en total — cubre TODOS, máximo 2 casos cada uno):
+ENDPOINTS (${totalEndpoints} — cubre TODOS):
 ${endpointListStr}
 
 OpenAPI Spec:
 ${JSON.stringify(openAPISpec, null, 2)}
 
-Colección:
-- Nombre: "API Test Generator - Colección Automática (${new Date().toISOString()})"
-- Variable: "baseUrl" = "${API_BASE_URL}"
-- Carpetas: Users, Products, Orders
-- Exactamente 2 casos por endpoint: 1 exitoso + 1 negativo
+Variables de colección: baseUrl="${API_BASE_URL}", userId, productId, orderId
+Carpetas: Users, Products, Orders (cada una con POST exitoso PRIMERO)
 
-Formato de salida:
+Formato Postman v2.1:
 {
-  "info": { "name": "...", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
-  "variable": [{ "key": "baseUrl", "value": "${API_BASE_URL}" }],
-  "item": [ ... carpetas ... ]
+  "info": { "name": "API Test Generator - Colección Automática (${new Date().toISOString()})", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+  "variable": [
+    { "key": "baseUrl", "value": "${API_BASE_URL}" },
+    { "key": "userId", "value": "" },
+    { "key": "productId", "value": "" },
+    { "key": "orderId", "value": "" }
+  ],
+  "item": [ ... ]
 }`;
 
   const response = await openai.chat.completions.create({

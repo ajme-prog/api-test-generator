@@ -24,7 +24,7 @@ const cors    = require('cors');
 const morgan  = require('morgan');
 const path    = require('path');
 const fs      = require('fs');
-const { execSync } = require('child_process');
+const { exec } = require('child_process');
 const http = require('http');
 
 // ─────────────────────────────────────────────
@@ -377,19 +377,28 @@ async function main() {
   fs.writeFileSync(tmpCollection, JSON.stringify(faultyCollection, null, 2));
 
   console.log('▶️  Ejecutando Newman contra servidor con fallos...\n');
-  try {
-    execSync(
-      `npx newman run "${tmpCollection}" --reporters cli,json --reporter-json-export "${faultReportPath}" --timeout-request 10000 --timeout 180000`,
-      { stdio: 'inherit', timeout: 240000 }
-    );
-  } catch (e) {
-    // Newman sale con código 1 cuando hay assertions fallidas — eso es esperado
-    if (e.signal === 'SIGTERM') {
-      console.log('\n⚠️  Newman fue terminado por timeout — procesando resultados parciales');
-    } else {
-      console.log(`\nℹ️  Newman terminó con código ${e.status} (normal si hay fallos detectados)`);
-    }
+
+  // CRÍTICO: usar exec (asíncrono) en lugar de execSync.
+  // execSync bloquea el event loop de Node.js, lo que impide que
+  // Express responda a las peticiones de Newman (deadlock).
+  // Con exec asíncrono, Express sigue procesando requests mientras Newman ejecuta.
+  function runNewman(cmd) {
+    return new Promise((resolve) => {
+      const child = exec(cmd, { timeout: 240000 });
+      child.stdout.pipe(process.stdout);
+      child.stderr.pipe(process.stderr);
+      child.on('close', (code) => resolve(code));
+      child.on('error', (err) => {
+        console.warn(`⚠️  Error ejecutando Newman: ${err.message}`);
+        resolve(1);
+      });
+    });
   }
+
+  const exitCode = await runNewman(
+    `npx newman run "${tmpCollection}" --reporters cli,json --reporter-json-export "${faultReportPath}" --timeout-request 10000 --timeout 180000`
+  );
+  console.log(`\nℹ️  Newman terminó con código ${exitCode} (normal si hay fallos detectados)`);
 
   // Analizar resultados
   let detected = 0, total = 0;
