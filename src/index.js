@@ -9,6 +9,7 @@ const fs = require('fs');
 const usersRouter    = require('./routes/users');
 const productsRouter = require('./routes/products');
 const ordersRouter   = require('./routes/orders');
+const categoriesRouter = require('./routes/categories');
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.get('/api-docs.json', (req, res) => {
 app.use('/api/users',    usersRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/orders',   ordersRouter);
+app.use('/api/categories', categoriesRouter);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
