@@ -1,27 +1,32 @@
 #!/usr/bin/env node
 /**
  * generate-tests.js
- * 
+ *
  * Script principal del prototipo: lee el spec OpenAPI de la API,
- * lo envía a GPT-4 y genera automáticamente una colección de Postman
+ * lo envía a GPT-4o y genera automáticamente una colección de Postman
  * lista para ejecutar con Newman en el pipeline CI/CD.
- * 
+ *
  * Tesis: "Desarrollo de un prototipo para la generación automatizada
  * de casos de prueba en APIs REST mediante modelos de lenguaje
  * integrados en pipelines CI/CD"
+ *
+ * CORRECCIÓN v2:
+ * - Prompt mejorado con instrucción de exhaustividad explícita
+ * - El modelo recibe la lista exacta de endpoints antes de generar
+ * - Se instruye a no duplicar endpoints ya cubiertos
  */
 
 require('dotenv').config();
 const OpenAI = require('openai');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+const axios  = require('axios');
+const fs     = require('fs');
+const path   = require('path');
 const { uploadToS3 } = require('../src/utils/s3-uploader');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
+const API_BASE_URL  = process.env.API_BASE_URL  || 'http://localhost:3000';
+const MODEL         = process.env.OPENAI_MODEL  || 'gpt-4o';
 const POSTMAN_OUTPUT = path.join(__dirname, '../postman/collection.json');
 
 // ─────────────────────────────────────────────
@@ -38,53 +43,65 @@ async function fetchOpenAPISpec() {
   }
 }
 
+/**
+ * Extrae la lista exacta de METHOD + PATH del spec OpenAPI.
+ * Se usa para construir el prompt de exhaustividad.
+ */
+function extractEndpointList(openAPISpec) {
+  const httpMethods = ['get','post','put','patch','delete','head','options'];
+  const endpoints = [];
+  for (const [routePath, methods] of Object.entries(openAPISpec.paths || {})) {
+    for (const method of Object.keys(methods)) {
+      if (httpMethods.includes(method.toLowerCase())) {
+        endpoints.push(`${method.toUpperCase()} ${routePath}`);
+      }
+    }
+  }
+  return endpoints;
+}
+
 // ─────────────────────────────────────────────
-// 2. Llamar a GPT-4 para generar los test cases
+// 2. Llamar a GPT-4o para generar los test cases
 // ─────────────────────────────────────────────
 async function generateTestsWithLLM(openAPISpec) {
   console.log(`\n🤖 Enviando spec a ${MODEL} para generar casos de prueba...`);
+
+  const endpointList = extractEndpointList(openAPISpec);
+  const endpointListStr = endpointList.map((e, i) => `  ${i + 1}. ${e}`).join('\n');
 
   const systemPrompt = `Eres un experto en QA y pruebas de APIs REST. Tu tarea es generar una colección de Postman completa y lista para ejecutar con Newman.
 
 REGLAS ESTRICTAS:
 1. Responde ÚNICAMENTE con JSON válido. Sin texto adicional, sin comentarios, sin markdown.
-2. Genera casos de prueba positivos (happy path) Y negativos (edge cases, validaciones, errores).
-3. Para cada endpoint del spec, incluye al menos:
-   - 1 caso exitoso (status 2xx)
-   - 1 caso con datos inválidos/faltantes (status 4xx)
-   - 1 caso de recurso no encontrado donde aplique (status 404)
-4. Cada request debe incluir "tests" en JavaScript para validar status code, tiempo de respuesta y estructura del body.
-5. Usa variables de colección para el baseUrl y para IDs creados dinámicamente.
-6. El JSON debe seguir exactamente el formato de colección de Postman v2.1.
-7. CRÍTICO: Usa las URLs EXACTAS del spec OpenAPI. Por ejemplo, si el spec dice "/api/users", el request debe ir a "{{baseUrl}}/api/users", NUNCA a "{{baseUrl}}/" ni a rutas genéricas. Cada request DEBE incluir la ruta completa del endpoint incluyendo el prefijo /api/.
-8. Para endpoints con parámetros de ruta como /api/users/{id}, usa el ID guardado dinámicamente en la variable de colección o un ID numérico concreto como 1, 2 o 99999 (para casos 404).
-9. NUNCA generes rutas genéricas como "/" o "/{id}". Siempre usa la ruta completa del spec.`;
+2. EXHAUSTIVIDAD OBLIGATORIA: Debes generar al menos un caso de prueba para CADA endpoint de la lista que recibirás. No puedes omitir ninguno. Antes de terminar, verifica que todos los endpoints estén cubiertos.
+3. Para cada endpoint genera:
+   - 1 caso exitoso (status 2xx) — happy path
+   - 1 caso con datos inválidos o faltantes (status 4xx) donde aplique
+   - 1 caso de recurso no encontrado (status 404) para endpoints con parámetro /{id}
+4. NO dupliques el mismo endpoint+método más de 2 veces. Si ya tienes un caso positivo y uno negativo para un endpoint, no agregues un tercero del mismo tipo.
+5. Cada request debe incluir scripts de test en JavaScript para validar: status code esperado, tiempo de respuesta (<2000ms) y estructura básica del body.
+6. Usa variables de colección para baseUrl e IDs creados dinámicamente.
+7. El JSON debe seguir exactamente el formato de colección Postman v2.1.
+8. Usa las URLs EXACTAS del spec. Si el spec dice "/api/users/{id}", el request debe ir a "{{baseUrl}}/api/users/{{userId}}" o "{{baseUrl}}/api/users/1".
+9. Los casos POST deben guardar el ID creado en una variable: pm.collectionVariables.set('userId', pm.response.json().id)
+10. Para casos 404, usa IDs inexistentes como 99999.`;
 
   const userPrompt = `Genera una colección de Postman completa para la siguiente API REST.
 
-IMPORTANTE: Lee el spec completo. Cada endpoint tiene una ruta específica como /api/users, /api/products, /api/orders. Usa esas rutas EXACTAS en cada request. NO uses rutas genéricas.
+PASO 1 — LISTA COMPLETA DE ENDPOINTS A CUBRIR (obligatorio cubrir TODOS):
+${endpointListStr}
 
-OpenAPI Spec:
+PASO 2 — Para cada endpoint de la lista anterior, genera los casos de prueba indicados en las reglas.
+Verifica al finalizar que cada número de la lista tenga al menos un caso generado.
+
+OpenAPI Spec completo:
 ${JSON.stringify(openAPISpec, null, 2)}
 
 La colección debe:
 - Llamarse "API Test Generator - Colección Automática (${new Date().toISOString()})"
 - Tener una variable de colección "baseUrl" con valor "${API_BASE_URL}"
-- Organizar los requests por carpetas: una para Users (/api/users), una para Products (/api/products), una para Orders (/api/orders)
-- En cada request, la URL debe ser "{{baseUrl}}/api/users", "{{baseUrl}}/api/products/{{productId}}", etc. NUNCA "{{baseUrl}}/" ni "{{baseUrl}}/{{id}}"
-- Incluir scripts de test en cada request para validar: status code esperado, tiempo de respuesta (<2000ms), y estructura del JSON de respuesta
-- Los casos POST deben guardar el ID creado en una variable de colección (ej: pm.collectionVariables.set('userId', json.id)) para usarlo en los siguientes requests GET, PUT, DELETE
-- Para casos 404, usar IDs que no existen como 99999
-
-Ejemplo de un request correcto:
-{
-  "name": "GET /api/users - Listar todos",
-  "request": {
-    "method": "GET",
-    "url": "{{baseUrl}}/api/users"
-  },
-  "event": [{"listen":"test","script":{"exec":["pm.test('Status 200', () => pm.response.to.have.status(200));"]}}]
-}
+- Organizar los requests en carpetas por recurso: Users, Products, Orders
+- Incluir scripts de test en cada request
 
 Formato de salida (Postman v2.1):
 {
@@ -98,17 +115,15 @@ Formato de salida (Postman v2.1):
     max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS) || 16000,
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
+      { role: 'user',   content: userPrompt },
     ],
-    temperature: 0.2, // Baja temperatura para output más determinístico y válido
+    temperature: 0.2,
   });
 
   const rawContent = response.choices[0].message.content.trim();
-  
-  // Limpiar posibles bloques de código markdown
-  const cleaned = rawContent.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-  
-  console.log(`✅ GPT-4 generó respuesta (${rawContent.length} caracteres)`);
+  const cleaned    = rawContent.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+
+  console.log(`✅ GPT-4o generó respuesta (${rawContent.length} caracteres)`);
   console.log(`📊 Tokens usados: prompt=${response.usage.prompt_tokens}, completion=${response.usage.completion_tokens}, total=${response.usage.total_tokens}`);
 
   return { raw: cleaned, usage: response.usage };
@@ -122,33 +137,29 @@ function parseAndEnrichCollection(rawJson, openAPISpec) {
   try {
     collection = JSON.parse(rawJson);
   } catch (e) {
-    throw new Error(`GPT-4 no generó JSON válido: ${e.message}\nContenido recibido:\n${rawJson.substring(0, 500)}...`);
+    throw new Error(`GPT-4o no generó JSON válido: ${e.message}\nContenido recibido:\n${rawJson.substring(0, 500)}...`);
   }
 
-  // Asegurar que la colección tiene el schema correcto
-  if (!collection.info) {
-    collection.info = {};
-  }
+  if (!collection.info) collection.info = {};
   collection.info.schema = 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json';
 
-  // Agregar metadata de generación
   collection._generatedBy = 'api-test-generator-llm';
   collection._generatedAt = new Date().toISOString();
-  collection._sourceSpec = openAPISpec.info?.title || 'Unknown API';
-  collection._model = MODEL;
+  collection._sourceSpec  = openAPISpec.info?.title || 'Unknown API';
+  collection._model       = MODEL;
 
   return collection;
 }
 
 // ─────────────────────────────────────────────
-// 4. Guardar colección y métricas
+// 4. Contar requests en la colección
 // ─────────────────────────────────────────────
 function countRequests(collection) {
   let count = 0;
   function traverse(items) {
     if (!items) return;
     for (const item of items) {
-      if (item.item) traverse(item.item); // carpeta
+      if (item.item) traverse(item.item);
       else count++;
     }
   }
@@ -156,20 +167,20 @@ function countRequests(collection) {
   return count;
 }
 
+// ─────────────────────────────────────────────
+// 5. Guardar colección y métricas
+// ─────────────────────────────────────────────
 async function saveResults(collection, metrics) {
-  // Guardar colección Postman
   fs.mkdirSync(path.dirname(POSTMAN_OUTPUT), { recursive: true });
   fs.writeFileSync(POSTMAN_OUTPUT, JSON.stringify(collection, null, 2));
   console.log(`\n💾 Colección guardada en: ${POSTMAN_OUTPUT}`);
 
-  // Guardar métricas
-  const metricsDir = path.join(__dirname, '../reports');
+  const metricsDir  = path.join(__dirname, '../reports');
   fs.mkdirSync(metricsDir, { recursive: true });
   const metricsPath = path.join(metricsDir, 'generation-metrics.json');
   fs.writeFileSync(metricsPath, JSON.stringify(metrics, null, 2));
   console.log(`📈 Métricas guardadas en: ${metricsPath}`);
 
-  // Subir a S3 si está configurado
   if (process.env.AWS_ACCESS_KEY_ID && process.env.S3_BUCKET_NAME) {
     try {
       await uploadToS3(POSTMAN_OUTPUT, `collections/collection-${metrics.timestamp}.json`);
@@ -193,13 +204,8 @@ async function main() {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
   try {
-    // Paso 1: Obtener spec
     const openAPISpec = await fetchOpenAPISpec();
-
-    // Paso 2: Generar con LLM
     const { raw, usage } = await generateTestsWithLLM(openAPISpec);
-
-    // Paso 3: Parsear y enriquecer
     const collection = parseAndEnrichCollection(raw, openAPISpec);
 
     const requestCount = countRequests(collection);
@@ -208,7 +214,6 @@ async function main() {
     console.log(`\n📋 Casos de prueba generados: ${requestCount}`);
     console.log(`⏱️  Tiempo de generación: ${duration}s`);
 
-    // Paso 4: Guardar
     const metrics = {
       timestamp,
       model: MODEL,
@@ -216,7 +221,7 @@ async function main() {
       casesGenerated: requestCount,
       tokensUsed: usage,
       apiEndpoints: (() => {
-        const paths = openAPISpec.paths || {};
+        const paths   = openAPISpec.paths || {};
         const methods = ['get','post','put','patch','delete','head','options'];
         let count = 0;
         for (const p of Object.values(paths)) {

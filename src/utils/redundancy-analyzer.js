@@ -6,26 +6,19 @@
  *
  * NIVEL 1 — Redundancia exacta (automática, objetiva):
  *   Dos casos son exactamente redundantes si tienen el mismo
- *   método HTTP + el mismo path de endpoint. Ej: dos veces
+ *   método HTTP + el mismo path normalizado de endpoint. Ej: dos veces
  *   "POST /api/users" con distintos bodies pero probando lo mismo.
  *
  * NIVEL 2 — Redundancia semántica (semi-automática, cualitativa):
  *   Clasifica cada grupo de casos por endpoint+método según el
  *   tipo de assertion que contiene: positivo (2xx), negativo (4xx/5xx),
  *   o mixto. Permite identificar si GPT-4o generó múltiples casos
- *   negativos que prueban exactamente lo mismo (ej: tres veces "campo
- *   faltante" para el mismo endpoint).
+ *   negativos que prueban exactamente lo mismo.
  *
- * Genera:
- *   - redundancyRate     → % de casos que duplican un endpoint+método ya cubierto
- *   - uniqueCoverage     → cantidad de combinaciones endpoint+método únicas
- *   - groupDetail        → desglose por endpoint: cuántos casos positivos y negativos
- *   - qualitativeFlags   → lista de grupos con posible redundancia semántica
- *
- * Referencia tesis:
- *   "Redundancia de casos: Se evaluará la existencia de casos de prueba
- *    repetidos o que no aporten valor adicional en la validación del sistema."
- *   (Marco metodológico, Técnicas de análisis de información)
+ * CORRECCIÓN v2: normalización de rutas mejorada para distinguir
+ *   correctamente entre rutas de colección (/api/users) y rutas de
+ *   recurso individual (/api/users/{id}), evitando agrupaciones
+ *   incorrectas por prefijo común.
  */
 
 'use strict';
@@ -48,36 +41,58 @@ function flattenItems(items = []) {
 
 /**
  * Extrae método y path normalizado de un request de Postman.
- * Normaliza variables de path (:id, {{id}}) a ":param" para
- * que "GET /api/users/1" y "GET /api/users/{{userId}}" se
- * consideren el mismo endpoint.
+ *
+ * Reglas de normalización:
+ * 1. Elimina baseUrl y variables de colección ({{baseUrl}})
+ * 2. Elimina query string
+ * 3. Normaliza SOLO segmentos que son IDs concretos (numéricos o variables
+ *    como {{userId}}) a ":param", pero NUNCA normaliza segmentos de texto
+ *    fijo como "status", "users", "products", etc.
+ * 4. Esto garantiza que GET /api/users y GET /api/users/{id} sean
+ *    grupos distintos, y que PATCH /api/orders/{id}/status sea distinto
+ *    de DELETE /api/orders/{id}.
  */
 function extractEndpoint(request) {
   const method = (request.method || 'GET').toUpperCase();
-  let path = '';
+  let rawPath = '';
 
   if (request.url) {
     if (typeof request.url === 'string') {
-      path = request.url;
+      rawPath = request.url;
     } else if (Array.isArray(request.url.path)) {
-      path = '/' + request.url.path.join('/');
+      // Reconstruir desde el array de segmentos (formato Postman v2.1)
+      rawPath = '/' + request.url.path.join('/');
     } else if (request.url.raw) {
-      path = request.url.raw;
+      rawPath = request.url.raw;
     }
   }
 
-  // Quitar baseUrl y variables de colección ({{baseUrl}})
-  path = path.replace(/{{[^}]+}}/g, '').replace(/^https?:\/\/[^/]+/, '');
+  // Eliminar protocolo y host (http://localhost:3000 o {{baseUrl}})
+  rawPath = rawPath
+    .replace(/\{\{[^}]+\}\}/g, '')          // quitar {{baseUrl}}, {{userId}}, etc.
+    .replace(/^https?:\/\/[^/]*/,'');        // quitar http://host
 
-  // Normalizar segmentos numéricos o de variable a :param
-  path = path.replace(/\/\d+/g, '/:param');
-  path = path.replace(/\/:param\/status/g, '/:param/status'); // mantener sub-rutas
+  // Eliminar query string
+  rawPath = rawPath.split('?')[0];
 
-  // Limpiar query string para identificar el endpoint base
-  path = path.split('?')[0];
+  // Normalizar segmentos que son IDs dinámicos:
+  // - Numéricos puros: /1, /99999, /123
+  // - Variables Postman ya resueltas como segmento vacío tras quitar {{...}}
+  // - Segmentos que son UUIDs (letras-números-guiones, 8+ chars)
+  // NO normalizar segmentos de texto fijo como /status, /users, /api
+  const segments = rawPath.split('/').map(seg => {
+    if (!seg) return seg;                          // segmento vacío (slashes dobles)
+    if (/^\d+$/.test(seg)) return ':param';        // ID numérico → :param
+    if (/^[0-9a-f-]{8,}$/i.test(seg)) return ':param'; // UUID → :param
+    if (seg === '') return ':param';               // variable {{id}} ya eliminada → vacío
+    return seg;                                    // texto fijo: conservar tal cual
+  });
 
-  // Limpiar slashes dobles
+  let path = segments.join('/');
+
+  // Limpiar slashes dobles y trailing slash (excepto raíz)
   path = path.replace(/\/+/g, '/');
+  if (path.length > 1) path = path.replace(/\/$/, '');
   if (!path.startsWith('/')) path = '/' + path;
 
   return { method, path, key: `${method} ${path}` };
@@ -90,7 +105,6 @@ function extractEndpoint(request) {
 function classifyCase(item) {
   const scripts = [];
 
-  // Buscar en event (Postman v2.1)
   if (Array.isArray(item.event)) {
     for (const ev of item.event) {
       if (ev.listen === 'test' && ev.script?.exec) {
@@ -100,8 +114,6 @@ function classifyCase(item) {
   }
 
   const code = scripts.join('\n');
-
-  // Buscar status codes en los assertions
   const positiveMatch = /\.status\(2\d{2}\)|to\.have\.status\(2\d{2}\)|status.*20[0-9]/i.test(code);
   const negativeMatch = /\.status\([45]\d{2}\)|to\.have\.status\([45]\d{2}\)|status.*4[0-9]{2}|status.*5[0-9]{2}/i.test(code);
 
@@ -134,7 +146,7 @@ function analyzeRedundancy(collection) {
     };
   }
 
-  // Agrupar por endpoint+método
+  // Agrupar por endpoint+método normalizado
   const groups = {};
   for (const item of items) {
     const { key, method, path } = extractEndpoint(item.request || {});
@@ -142,16 +154,14 @@ function analyzeRedundancy(collection) {
       groups[key] = { method, path, key, cases: [] };
     }
     groups[key].cases.push({
-      name:  item.name || 'Sin nombre',
-      type:  classifyCase(item),
+      name: item.name || 'Sin nombre',
+      type: classifyCase(item),
     });
   }
 
   const groupList = Object.values(groups);
   const uniqueEndpointMethod = groupList.length;
 
-  // Redundancia exacta: cualquier caso más allá del primero
-  // de cada combinación endpoint+método
   let exactDuplicates = 0;
   const groupDetail = [];
   const qualitativeFlags = [];
@@ -168,7 +178,7 @@ function analyzeRedundancy(collection) {
     exactDuplicates += duplicatesInGroup;
 
     const detail = {
-      endpoint:  group.key,
+      endpoint: group.key,
       totalCases: count,
       positive,
       negative,
@@ -179,34 +189,29 @@ function analyzeRedundancy(collection) {
     };
     groupDetail.push(detail);
 
-    // Flags cualitativos: posible redundancia semántica
-    // cuando hay múltiples casos negativos (pueden probar lo mismo)
     if (negative >= 3) {
       qualitativeFlags.push({
-        endpoint:  group.key,
-        reason:    `${negative} casos negativos — revisar si prueban validaciones distintas`,
-        severity:  'medium',
-        cases:     group.cases.filter(c => c.type === 'negative').map(c => c.name),
+        endpoint: group.key,
+        reason: `${negative} casos negativos — revisar si prueban validaciones distintas`,
+        severity: 'medium',
+        cases: group.cases.filter(c => c.type === 'negative').map(c => c.name),
       });
     }
-    // Flag si hay más de 2 casos positivos (raro que todos aporten algo único)
     if (positive >= 3) {
       qualitativeFlags.push({
-        endpoint:  group.key,
-        reason:    `${positive} casos positivos — verificar que cada uno cubre un escenario distinto`,
-        severity:  'low',
-        cases:     group.cases.filter(c => c.type === 'positive').map(c => c.name),
+        endpoint: group.key,
+        reason: `${positive} casos positivos — verificar que cada uno cubre un escenario distinto`,
+        severity: 'low',
+        cases: group.cases.filter(c => c.type === 'positive').map(c => c.name),
       });
     }
   }
 
   const redundancyRate = ((exactDuplicates / total) * 100).toFixed(2) + '%';
-
-  // Ordenar groupDetail de mayor a menor casos (los más redundantes primero)
   groupDetail.sort((a, b) => b.totalCases - a.totalCases);
 
   return {
-    totalCases:           total,
+    totalCases: total,
     uniqueEndpointMethod,
     exactDuplicates,
     redundancyRate,
@@ -223,7 +228,9 @@ function buildSummary(total, unique, duplicates, rate, flags) {
     `La colección tiene ${total} casos de prueba cubriendo ${unique} combinaciones ` +
     `endpoint+método únicas. Se detectaron ${duplicates} casos exactamente redundantes ` +
     `(tasa de redundancia: ${rate}, nivel ${level}). ` +
-    `${flags > 0 ? `Además, ${flags} grupo(s) presentan posible redundancia semántica que requiere revisión cualitativa.` : 'No se detectaron grupos con posible redundancia semántica.'}`
+    `${flags > 0
+      ? `Además, ${flags} grupo(s) presentan posible redundancia semántica que requiere revisión cualitativa.`
+      : 'No se detectaron grupos con posible redundancia semántica.'}`
   );
 }
 
